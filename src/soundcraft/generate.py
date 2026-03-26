@@ -63,12 +63,12 @@ def _prompt_to_slug(prompt: str, max_words: int = 4) -> str:
 
 
 def _next_seq(output_dir: Path, slug: str) -> int:
-    existing = list(output_dir.glob(f"{slug}_*.wav"))
+    existing = list(output_dir.glob(f"{slug}_*.*"))
     if not existing:
         return 1
     nums = []
     for p in existing:
-        match = re.search(r'_(\d{3})\.wav$', p.name)
+        match = re.search(r'_(\d{3})\.\w+$', p.name)
         if match:
             nums.append(int(match.group(1)))
     return max(nums, default=0) + 1
