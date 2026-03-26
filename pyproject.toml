@@ -1,11 +1,12 @@
 [project]
 name = "soundcraft"
 version = "0.1.0"
-description = "MusicGen CLI tool for generating instrumental music via Replicate API"
+description = "CLI tool for generating instrumental music via MusicGen and Lyria3"
 requires-python = ">=3.10"
 dependencies = [
     "requests",
     "python-dotenv",
+    "google-genai",
 ]
 
 [project.scripts]
