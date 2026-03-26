@@ -9,7 +9,9 @@ Text input (Japanese/English) → LLM prompt refinement → MusicGen (Replicate 
 ## Setup
 
 ```bash
-pip install -e .
+uv venv
+uv pip install -e .
+source .venv/bin/activate
 ```
 
 Create `.env`:
@@ -67,6 +69,6 @@ WAV files saved to output/
 
 ## Requirements
 
-- Python 3.10+
+- Python 3.10+ / [uv](https://docs.astral.sh/uv/)
 - [Replicate API token](https://replicate.com/account/api-tokens)
 - LM Studio (optional, for prompt refinement)
