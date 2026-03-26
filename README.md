@@ -1,5 +1,7 @@
 # soundcraft
 
+[日本語](README.ja.md)
+
 MusicGen CLI tool for generating instrumental music from text prompts.
 
 Text input (Japanese/English) → LLM prompt refinement → MusicGen (Replicate API) → WAV files
