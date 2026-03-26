@@ -15,5 +15,8 @@ build/
 # macOS
 .DS_Store
 
+# tasks / notes
+tasks/
+
 # Claude Code
 .claude/
