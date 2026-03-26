@@ -1,0 +1,19 @@
+# secrets
+.env
+
+# generated audio
+output/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+dist/
+build/
+
+# macOS
+.DS_Store
+
+# Claude Code
+.claude/
