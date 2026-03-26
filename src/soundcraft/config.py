@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN", "")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
 MODELS = ["melody-large", "stereo-melody-large", "large", "stereo-large"]
 
@@ -17,3 +18,7 @@ REPLICATE_MODEL_VERSION = "671ac645ce5e552cc63a54a2bbff63fcf798043055d2dac5fc9e3
 
 LM_STUDIO_URL = os.getenv("LM_STUDIO_URL", "http://localhost:1234")
 LM_STUDIO_MODEL = os.getenv("LM_STUDIO_MODEL", "liquid/lfm2-24b-a2b")
+
+BACKENDS = ["musicgen", "lyria3"]
+DEFAULT_BACKEND = "musicgen"
+LYRIA3_MODEL = "lyria-3-clip-preview"
