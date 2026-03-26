@@ -9,7 +9,9 @@
 ## セットアップ
 
 ```bash
-pip install -e .
+uv venv
+uv pip install -e .
+source .venv/bin/activate
 ```
 
 `.env` を作成:
@@ -67,6 +69,6 @@ WAV ファイルを output/ に保存
 
 ## 必要なもの
 
-- Python 3.10+
+- Python 3.10+ / [uv](https://docs.astral.sh/uv/)
 - [Replicate API トークン](https://replicate.com/account/api-tokens)
 - LM Studio（任意、プロンプト整形用）
