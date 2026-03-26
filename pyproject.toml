@@ -1,0 +1,19 @@
+[project]
+name = "soundcraft"
+version = "0.1.0"
+description = "MusicGen CLI tool for generating instrumental music via Replicate API"
+requires-python = ">=3.10"
+dependencies = [
+    "requests",
+    "python-dotenv",
+]
+
+[project.scripts]
+soundcraft = "soundcraft.cli:main"
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
