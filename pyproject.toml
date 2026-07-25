@@ -1,12 +1,14 @@
 [project]
 name = "soundcraft"
-version = "0.1.0"
-description = "CLI tool for generating instrumental music via MusicGen and Lyria3"
+version = "0.3.0"
+description = "CLI, GUI, and local API for generating instrumental music via MusicGen and Lyria3"
 requires-python = ">=3.10"
 dependencies = [
     "requests",
     "python-dotenv",
     "google-genai",
+    "fastapi",
+    "uvicorn[standard]",
 ]
 
 [project.scripts]
@@ -18,3 +20,6 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+soundcraft = ["static/*"]
