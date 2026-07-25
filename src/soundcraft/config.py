@@ -22,3 +22,6 @@ LM_STUDIO_MODEL = os.getenv("LM_STUDIO_MODEL", "liquid/lfm2-24b-a2b")
 BACKENDS = ["musicgen", "lyria3"]
 DEFAULT_BACKEND = "musicgen"
 LYRIA3_MODEL = "lyria-3-clip-preview"
+
+DEFAULT_SERVER_HOST = "127.0.0.1"
+DEFAULT_SERVER_PORT = 8765
