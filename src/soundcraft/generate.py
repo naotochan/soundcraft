@@ -4,7 +4,7 @@ from pathlib import Path
 
 import requests
 
-from soundcraft.config import REPLICATE_API_TOKEN, REPLICATE_MODEL_VERSION
+from soundcraft.config import REPLICATE_MODEL_VERSION, get_replicate_api_token
 
 API_BASE = "https://api.replicate.com/v1/predictions"
 
@@ -15,11 +15,15 @@ def generate_music(
     duration: int,
     output_dir: Path,
 ) -> Path:
-    if not REPLICATE_API_TOKEN:
-        raise SystemExit("Error: REPLICATE_API_TOKEN is not set. Create a .env file or set the environment variable.")
+    token = get_replicate_api_token()
+    if not token:
+        raise SystemExit(
+            "Error: REPLICATE_API_TOKEN is not set. "
+            "Add it in Settings, or create a .env file / set the environment variable."
+        )
 
     headers = {
-        "Authorization": f"Bearer {REPLICATE_API_TOKEN}",
+        "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
     }
 

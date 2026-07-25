@@ -7,7 +7,7 @@ from soundcraft.config import (
     DEFAULT_BACKEND,
     DEFAULT_DURATION,
     DEFAULT_MODEL,
-    DEFAULT_OUTPUT_DIR,
+    default_output_dir,
 )
 from soundcraft.generate import generate_music
 from soundcraft.generate_lyria import generate_music_lyria
@@ -29,21 +29,22 @@ def run_generate(
     model: str = DEFAULT_MODEL,
     duration: int = DEFAULT_DURATION,
     count: int = 1,
-    output_dir: Path = DEFAULT_OUTPUT_DIR,
+    output_dir: Path | None = None,
     raw: bool = False,
 ) -> GenerateResult:
+    out = output_dir if output_dir is not None else default_output_dir()
     prompt = text if raw else refine_prompt(text)
 
     files: list[Path] = []
     for _ in range(count):
         if backend == "lyria3":
-            path = generate_music_lyria(prompt=prompt, output_dir=output_dir)
+            path = generate_music_lyria(prompt=prompt, output_dir=out)
         else:
             path = generate_music(
                 prompt=prompt,
                 model_version=model,
                 duration=duration,
-                output_dir=output_dir,
+                output_dir=out,
             )
         files.append(path.resolve())
 

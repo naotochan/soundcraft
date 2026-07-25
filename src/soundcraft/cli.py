@@ -7,10 +7,10 @@ from soundcraft.config import (
     DEFAULT_BACKEND,
     DEFAULT_DURATION,
     DEFAULT_MODEL,
-    DEFAULT_OUTPUT_DIR,
     DEFAULT_SERVER_HOST,
     DEFAULT_SERVER_PORT,
     MODELS,
+    default_output_dir,
 )
 from soundcraft.pipeline import run_generate
 
@@ -38,8 +38,8 @@ def _build_generate_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "-o", "--output",
         type=Path,
-        default=DEFAULT_OUTPUT_DIR,
-        help=f"Output directory (default: {DEFAULT_OUTPUT_DIR})",
+        default=None,
+        help="Output directory (default: output/ or Documents/soundcraft/output in app mode)",
     )
     parser.add_argument(
         "-n", "--count",
@@ -83,7 +83,7 @@ def cmd_generate(args: argparse.Namespace) -> None:
         model=args.model,
         duration=args.duration,
         count=args.count,
-        output_dir=args.output,
+        output_dir=args.output if args.output is not None else default_output_dir(),
         raw=True,
     )
 
@@ -106,6 +106,12 @@ def cmd_gui(args: argparse.Namespace) -> None:
     from soundcraft.server import run_server
 
     run_server(host=args.host, port=args.port, open_browser=not args.no_browser)
+
+
+def cmd_app(args: argparse.Namespace) -> None:
+    from soundcraft.app import run_desktop_app
+
+    run_desktop_app(host=args.host, port=args.port)
 
 
 def _add_server_args(parser: argparse.ArgumentParser) -> None:
@@ -154,8 +160,15 @@ def main(argv: list[str] | None = None) -> None:
     )
     gui_parser.set_defaults(func=cmd_gui)
 
+    app_parser = sub.add_parser(
+        "app",
+        help="Start desktop app window (pywebview) with embedded local API",
+    )
+    _add_server_args(app_parser)
+    app_parser.set_defaults(func=cmd_app)
+
     # Backward compatible: `soundcraft "prompt" ...` → generate
-    if argv and argv[0] not in ("generate", "serve", "gui", "-h", "--help"):
+    if argv and argv[0] not in ("generate", "serve", "gui", "app", "-h", "--help"):
         argv = ["generate", *argv]
 
     args = parser.parse_args(argv)

@@ -21,19 +21,24 @@ from soundcraft.config import (
     DEFAULT_BACKEND,
     DEFAULT_DURATION,
     DEFAULT_MODEL,
-    DEFAULT_OUTPUT_DIR,
     DEFAULT_SERVER_HOST,
     DEFAULT_SERVER_PORT,
     MODELS,
+    default_output_dir,
+    get_gemini_api_key,
+    get_replicate_api_token,
+    read_settings_public,
+    save_settings,
 )
 from soundcraft.pipeline import run_generate
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+APP_VERSION = "0.4.0"
 
 app = FastAPI(
     title="soundcraft",
     description="Local API and GUI for instrumental music generation (MusicGen / Lyria3)",
-    version="0.3.0",
+    version=APP_VERSION,
 )
 
 _jobs_lock = threading.Lock()
@@ -97,7 +102,7 @@ def _validate_request(req: GenerateRequest) -> None:
 
 
 def _allowed_media_roots() -> list[Path]:
-    roots = [DEFAULT_OUTPUT_DIR.resolve()]
+    roots = [default_output_dir().expanduser().resolve()]
     cwd_output = (Path.cwd() / "output").resolve()
     if cwd_output not in roots:
         roots.append(cwd_output)
@@ -114,7 +119,17 @@ def _is_under(path: Path, root: Path) -> bool:
 
 def _run_sync(req: GenerateRequest) -> GenerateResponse:
     _validate_request(req)
-    output_dir = Path(req.output_dir) if req.output_dir else DEFAULT_OUTPUT_DIR
+    if req.backend == "musicgen" and not get_replicate_api_token():
+        raise HTTPException(
+            400,
+            "REPLICATE_API_TOKEN is not set. Open Settings and add your Replicate token.",
+        )
+    if req.backend == "lyria3" and not get_gemini_api_key():
+        raise HTTPException(
+            400,
+            "GEMINI_API_KEY is not set. Open Settings and add your Gemini API key.",
+        )
+    output_dir = Path(req.output_dir) if req.output_dir else default_output_dir()
     try:
         result = run_generate(
             req.prompt,
@@ -180,9 +195,55 @@ def _job_to_response(job: Job) -> JobResponse:
     )
 
 
+class SettingsUpdate(BaseModel):
+    replicate_api_token: str | None = Field(
+        None, description="New Replicate token; omit to keep, empty string to clear"
+    )
+    gemini_api_key: str | None = Field(
+        None, description="New Gemini key; omit to keep, empty string to clear"
+    )
+    lm_studio_url: str | None = None
+    lm_studio_model: str | None = None
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "service": "soundcraft"}
+    return {"status": "ok", "service": "soundcraft", "version": APP_VERSION}
+
+
+@app.get("/settings")
+def get_settings() -> dict:
+    return read_settings_public()
+
+
+@app.put("/settings")
+def put_settings(body: SettingsUpdate) -> dict:
+    return save_settings(
+        replicate_api_token=body.replicate_api_token,
+        gemini_api_key=body.gemini_api_key,
+        lm_studio_url=body.lm_studio_url,
+        lm_studio_model=body.lm_studio_model,
+    )
+
+
+@app.post("/settings/open-output")
+def open_output_folder() -> dict[str, str]:
+    """Reveal the output directory in Finder (macOS) / file manager."""
+    import subprocess
+    import sys
+
+    path = default_output_dir().expanduser().resolve()
+    path.mkdir(parents=True, exist_ok=True)
+    try:
+        if sys.platform == "darwin":
+            subprocess.run(["open", str(path)], check=False)
+        elif sys.platform == "win32":
+            subprocess.run(["explorer", str(path)], check=False)
+        else:
+            subprocess.run(["xdg-open", str(path)], check=False)
+    except OSError as e:
+        raise HTTPException(500, f"Could not open folder: {e}") from e
+    return {"output_dir": str(path)}
 
 
 @app.post("/generate", response_model=GenerateResponse)
@@ -269,6 +330,8 @@ def run_server(
     print("  POST /jobs       (async)")
     print("  GET  /jobs/{id}")
     print("  GET  /media?path=")
+    print("  GET  /settings")
+    print("  PUT  /settings")
 
     if open_browser:
         threading.Timer(0.8, lambda: webbrowser.open(url)).start()

@@ -3,24 +3,34 @@ from pathlib import Path
 from google import genai
 from google.genai import types
 
-from soundcraft.config import GEMINI_API_KEY, LYRIA3_MODEL
+from soundcraft.config import LYRIA3_MODEL, get_gemini_api_key
 from soundcraft.generate import _next_seq, _prompt_to_slug
 
 _client = None
+_client_key: str | None = None
+
+
+def reset_client() -> None:
+    global _client, _client_key
+    _client = None
+    _client_key = None
 
 
 def _get_client() -> genai.Client:
-    global _client
-    if _client is None:
-        _client = genai.Client(api_key=GEMINI_API_KEY)
+    global _client, _client_key
+    key = get_gemini_api_key()
+    if _client is None or _client_key != key:
+        _client = genai.Client(api_key=key)
+        _client_key = key
     return _client
 
 
 def generate_music_lyria(prompt: str, output_dir: Path) -> Path:
-    if not GEMINI_API_KEY:
+    key = get_gemini_api_key()
+    if not key:
         raise SystemExit(
             "Error: GEMINI_API_KEY is not set. "
-            "Create a .env file or set the environment variable."
+            "Add it in Settings, or create a .env file / set the environment variable."
         )
 
     client = _get_client()

@@ -68,6 +68,13 @@
 
     .brand span { color: var(--accent); }
 
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      flex-wrap: wrap;
+    }
+
     .status {
       display: inline-flex;
       align-items: center;
@@ -85,7 +92,24 @@
     .dot.ok { background: var(--ok); box-shadow: 0 0 0 3px rgba(94, 207, 154, 0.18); }
     .dot.bad { background: var(--err); }
 
-    .compose {
+    button.ghost {
+      appearance: none;
+      border: 1px solid var(--line);
+      background: var(--bg-elev);
+      color: var(--text);
+      border-radius: 999px;
+      padding: 8px 14px;
+      font: inherit;
+      cursor: pointer;
+    }
+    button.ghost:hover { border-color: var(--accent); color: var(--accent); }
+    button.ghost.active {
+      border-color: var(--accent);
+      background: var(--accent-dim);
+      color: var(--accent);
+    }
+
+    .panel {
       background: color-mix(in srgb, var(--bg-elev) 88%, transparent);
       border: 1px solid var(--line);
       border-radius: 16px;
@@ -93,6 +117,8 @@
       backdrop-filter: blur(8px);
       animation: rise 0.5s ease-out both;
     }
+
+    .panel.hidden { display: none; }
 
     @keyframes rise {
       from { opacity: 0; transform: translateY(8px); }
@@ -108,10 +134,8 @@
       text-transform: uppercase;
     }
 
-    textarea {
+    textarea, input[type="text"], input[type="password"] {
       width: 100%;
-      min-height: 120px;
-      resize: vertical;
       border: 1px solid var(--line);
       border-radius: var(--radius);
       background: var(--bg);
@@ -121,11 +145,15 @@
       outline: none;
       transition: border-color 0.15s, box-shadow 0.15s;
     }
-    textarea:focus {
+    textarea {
+      min-height: 120px;
+      resize: vertical;
+    }
+    textarea:focus, input[type="text"]:focus, input[type="password"]:focus {
       border-color: var(--accent);
       box-shadow: 0 0 0 3px var(--accent-dim);
     }
-    textarea::placeholder { color: #5c6478; }
+    textarea::placeholder, input::placeholder { color: #5c6478; }
 
     .controls {
       display: grid;
@@ -177,7 +205,7 @@
     }
     .toggle input { accent-color: var(--accent); width: 16px; height: 16px; }
 
-    button.generate {
+    button.generate, button.primary {
       appearance: none;
       border: none;
       border-radius: 999px;
@@ -191,14 +219,52 @@
       cursor: pointer;
       transition: transform 0.12s ease, filter 0.12s ease, opacity 0.12s;
     }
-    button.generate:hover:not(:disabled) { filter: brightness(1.05); transform: translateY(-1px); }
-    button.generate:active:not(:disabled) { transform: translateY(0); }
-    button.generate:disabled { opacity: 0.55; cursor: wait; }
+    button.generate:hover:not(:disabled),
+    button.primary:hover:not(:disabled) { filter: brightness(1.05); transform: translateY(-1px); }
+    button.generate:active:not(:disabled),
+    button.primary:active:not(:disabled) { transform: translateY(0); }
+    button.generate:disabled, button.primary:disabled { opacity: 0.55; cursor: wait; }
 
     .hint {
       color: var(--muted);
       font-size: 12px;
       margin: 10px 0 0;
+    }
+
+    .warn {
+      margin-top: 12px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 1px solid color-mix(in srgb, var(--err) 40%, var(--line));
+      background: rgba(232, 106, 106, 0.08);
+      color: var(--err);
+      font-size: 12px;
+    }
+    .warn.hidden { display: none; }
+
+    .settings-grid {
+      display: grid;
+      gap: 16px;
+      margin-top: 4px;
+    }
+
+    .settings-actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 18px;
+      align-items: center;
+    }
+
+    .masked {
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 6px;
+    }
+
+    .ok-msg {
+      color: var(--ok);
+      font-size: 12px;
     }
 
     .results {
@@ -208,8 +274,8 @@
       animation: rise 0.55s ease-out 0.08s both;
     }
 
-    .results h2 {
-      margin: 0;
+    .results h2, .panel h2 {
+      margin: 0 0 4px;
       font-family: var(--font-display);
       font-size: 1.15rem;
       font-weight: 700;
@@ -312,13 +378,50 @@
   <div class="shell">
     <header>
       <h1 class="brand">sound<span>craft</span></h1>
-      <div class="status" id="apiStatus">
-        <span class="dot" id="apiDot"></span>
-        <span id="apiLabel">checking API…</span>
+      <div class="header-right">
+        <div class="status" id="apiStatus">
+          <span class="dot" id="apiDot"></span>
+          <span id="apiLabel">checking API…</span>
+        </div>
+        <button class="ghost" type="button" id="settingsToggle">Settings</button>
       </div>
     </header>
 
-    <section class="compose">
+    <section class="panel hidden" id="settingsPanel">
+      <h2>Settings</h2>
+      <p class="hint">API keys are saved on this Mac (Application Support). Leave a field blank to keep the current value.</p>
+      <div class="settings-grid">
+        <div>
+          <label class="field-label" for="replicateToken">Replicate API Token (MusicGen)</label>
+          <input id="replicateToken" type="password" autocomplete="off" placeholder="r8_…" />
+          <div class="masked" id="replicateMasked"></div>
+        </div>
+        <div>
+          <label class="field-label" for="geminiKey">Gemini API Key (Lyria3)</label>
+          <input id="geminiKey" type="password" autocomplete="off" placeholder="AIza…" />
+          <div class="masked" id="geminiMasked"></div>
+        </div>
+        <div>
+          <label class="field-label" for="lmUrl">LM Studio URL (optional)</label>
+          <input id="lmUrl" type="text" placeholder="http://localhost:1234" />
+        </div>
+        <div>
+          <label class="field-label" for="lmModel">LM Studio Model (optional)</label>
+          <input id="lmModel" type="text" placeholder="liquid/lfm2-24b-a2b" />
+        </div>
+        <div>
+          <label class="field-label">Output folder</label>
+          <div class="meta" id="outputDir">—</div>
+        </div>
+      </div>
+      <div class="settings-actions">
+        <button class="primary" type="button" id="saveSettingsBtn">Save</button>
+        <button class="ghost" type="button" id="openOutputBtn">Open output folder</button>
+        <span class="ok-msg hidden" id="settingsSaved">Saved</span>
+      </div>
+    </section>
+
+    <section class="panel" id="composePanel">
       <label class="field-label" for="prompt">Prompt</label>
       <textarea id="prompt" placeholder="暗い、鼓動、インスタレーション / dark ambient drone, heavy reverb"></textarea>
 
@@ -357,16 +460,17 @@
         <button class="generate" id="generateBtn" type="button">Generate</button>
       </div>
       <p class="hint" id="backendHint">MusicGen → Replicate WAV · Lyria3 → Gemini MP3 (30s fixed)</p>
+      <div class="warn hidden" id="keyWarn"></div>
     </section>
 
-    <section class="results">
+    <section class="results" id="resultsSection">
       <h2>Results</h2>
       <div id="jobs"><div class="empty">生成結果がここに並びます</div></div>
     </section>
 
     <footer>
       <span>Local API also at <code id="apiUrl">/health</code> · TD: <code>POST /jobs</code></span>
-      <span>v0.3.0</span>
+      <span>v0.4.0</span>
     </footer>
   </div>
 
@@ -374,6 +478,7 @@
     const $ = (id) => document.getElementById(id);
     const jobsEl = $("jobs");
     const known = new Map();
+    let settingsCache = null;
 
     function setApiStatus(ok, detail) {
       $("apiDot").className = "dot " + (ok ? "ok" : "bad");
@@ -389,15 +494,89 @@
       $("backendHint").textContent = lyria
         ? "Lyria3 → Gemini MP3 · duration/model ignored (30s clip)"
         : "MusicGen → Replicate WAV · optional LM Studio refine";
+      updateKeyWarn();
+    }
+
+    function updateKeyWarn() {
+      const warn = $("keyWarn");
+      const btn = $("generateBtn");
+      if (!settingsCache) {
+        warn.classList.add("hidden");
+        return;
+      }
+      const lyria = $("backend").value === "lyria3";
+      const missing = lyria
+        ? !settingsCache.gemini_api_key_set
+        : !settingsCache.replicate_api_token_set;
+      if (missing) {
+        warn.textContent = lyria
+          ? "Gemini API key is not set. Open Settings and add GEMINI_API_KEY."
+          : "Replicate token is not set. Open Settings and add REPLICATE_API_TOKEN.";
+        warn.classList.remove("hidden");
+        btn.disabled = false;
+      } else {
+        warn.classList.add("hidden");
+      }
     }
 
     async function checkHealth() {
       try {
         const res = await fetch("/health");
         if (!res.ok) throw new Error("bad status");
-        setApiStatus(true, "API online · " + location.host);
+        const data = await res.json();
+        setApiStatus(true, "API online · " + location.host + (data.version ? " · v" + data.version : ""));
       } catch {
         setApiStatus(false, "API offline");
+      }
+    }
+
+    async function loadSettings() {
+      const res = await fetch("/settings");
+      if (!res.ok) throw new Error("settings failed");
+      settingsCache = await res.json();
+      $("replicateMasked").textContent = settingsCache.replicate_api_token_set
+        ? "Saved: " + settingsCache.replicate_api_token_masked
+        : "Not set";
+      $("geminiMasked").textContent = settingsCache.gemini_api_key_set
+        ? "Saved: " + settingsCache.gemini_api_key_masked
+        : "Not set";
+      $("lmUrl").value = settingsCache.lm_studio_url || "";
+      $("lmModel").value = settingsCache.lm_studio_model || "";
+      $("outputDir").textContent = settingsCache.output_dir || "—";
+      updateKeyWarn();
+    }
+
+    async function saveSettings() {
+      const body = {
+        lm_studio_url: $("lmUrl").value.trim(),
+        lm_studio_model: $("lmModel").value.trim(),
+      };
+      const r = $("replicateToken").value.trim();
+      const g = $("geminiKey").value.trim();
+      if (r) body.replicate_api_token = r;
+      if (g) body.gemini_api_key = g;
+
+      const btn = $("saveSettingsBtn");
+      btn.disabled = true;
+      try {
+        const res = await fetch("/settings", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || "save failed");
+        settingsCache = data;
+        $("replicateToken").value = "";
+        $("geminiKey").value = "";
+        await loadSettings();
+        const saved = $("settingsSaved");
+        saved.classList.remove("hidden");
+        setTimeout(() => saved.classList.add("hidden"), 2000);
+      } catch (err) {
+        alert(err.message || String(err));
+      } finally {
+        btn.disabled = false;
       }
     }
 
@@ -467,6 +646,18 @@
         return;
       }
 
+      if (settingsCache) {
+        const lyria = $("backend").value === "lyria3";
+        const missing = lyria
+          ? !settingsCache.gemini_api_key_set
+          : !settingsCache.replicate_api_token_set;
+        if (missing) {
+          showSettings(true);
+          updateKeyWarn();
+          return;
+        }
+      }
+
       const body = {
         prompt,
         backend: $("backend").value,
@@ -487,7 +678,10 @@
           body: JSON.stringify(body),
         });
         const job = await res.json();
-        if (!res.ok) throw new Error(job.detail || "request failed");
+        if (!res.ok) {
+          const detail = typeof job.detail === "string" ? job.detail : "request failed";
+          throw new Error(detail);
+        }
         renderJob(job);
         await pollJob(job.id);
       } catch (err) {
@@ -498,6 +692,25 @@
       }
     }
 
+    function showSettings(open) {
+      const panel = $("settingsPanel");
+      const toggle = $("settingsToggle");
+      if (open === undefined) open = panel.classList.contains("hidden");
+      panel.classList.toggle("hidden", !open);
+      toggle.classList.toggle("active", open);
+      toggle.textContent = open ? "Close settings" : "Settings";
+    }
+
+    $("settingsToggle").addEventListener("click", () => showSettings());
+    $("saveSettingsBtn").addEventListener("click", saveSettings);
+    $("openOutputBtn").addEventListener("click", async () => {
+      try {
+        await fetch("/settings/open-output", { method: "POST" });
+        await loadSettings();
+      } catch (err) {
+        alert(err.message || String(err));
+      }
+    });
     $("backend").addEventListener("change", syncBackendUi);
     $("generateBtn").addEventListener("click", generate);
     $("prompt").addEventListener("keydown", (e) => {
@@ -507,6 +720,7 @@
     $("apiUrl").textContent = location.origin + "/health";
     syncBackendUi();
     checkHealth();
+    loadSettings().catch(() => {});
     setInterval(checkHealth, 15000);
   </script>
 </body>

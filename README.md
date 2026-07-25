@@ -2,15 +2,26 @@
 
 [日本語](README.ja.md)
 
-CLI, local GUI, and API for generating instrumental music from text prompts via MusicGen and Lyria3.
+CLI, desktop app, local GUI, and API for generating instrumental music from text prompts via MusicGen and Lyria3.
 
 ```
 Text → (optional) LM Studio refine → MusicGen or Lyria3 → audio files
 ```
 
-Distribution is **source-first** (clone → run). There is no packaged macOS `.app`; the browser GUI is the app UI.
+## For everyone (macOS app)
 
-## Quick start
+1. Download **Soundcraft-macos.zip** from [Releases](https://github.com/naotochan/soundcraft/releases)
+2. Unzip and move `Soundcraft.app` to Applications (or anywhere you like)
+3. **First launch only** (unsigned build): in Finder, **right-click** `Soundcraft.app` → **Open** → **Open** again in the dialog  
+   (macOS Gatekeeper blocks unknown developers until you do this once; after that, double-click works)
+4. In the app, open **Settings** and paste at least one API key:
+   - [Replicate token](https://replicate.com/account/api-tokens) for MusicGen
+   - [Gemini API key](https://aistudio.google.com/apikey) for Lyria3
+5. Generate music — files go to `~/Documents/soundcraft/output/`
+
+Keys are stored at `~/Library/Application Support/soundcraft/.env` (this Mac only).
+
+## For developers (source)
 
 ```bash
 git clone https://github.com/naotochan/soundcraft.git
@@ -21,22 +32,33 @@ uv pip install -e .
 source .venv/bin/activate
 
 cp .env.example .env
-# edit .env — set at least one of:
-#   REPLICATE_API_TOKEN  (MusicGen)
-#   GEMINI_API_KEY       (Lyria3)
+# edit .env — or use Settings in the GUI / desktop app
 
-soundcraft gui
+soundcraft app          # desktop window (pywebview)
+soundcraft gui          # browser UI
+soundcraft serve        # API only (TouchDesigner, etc.)
+soundcraft "暗い、鼓動、インスタレーション"
 ```
-
-This starts the local server and opens `http://127.0.0.1:8765/` in your browser.
 
 | Need | Command |
 |------|---------|
-| GUI | `soundcraft gui` |
-| API only (TouchDesigner, etc.) | `soundcraft serve` |
-| One-shot CLI | `soundcraft "暗い、鼓動、インスタレーション"` |
+| Desktop app window | `soundcraft app` |
+| Browser GUI | `soundcraft gui` |
+| API only | `soundcraft serve` |
+| One-shot CLI | `soundcraft "…"` |
 
-## `.env`
+### Build the macOS `.app`
+
+```bash
+uv pip install -e ".[build]"
+chmod +x scripts/build_macos_app.sh
+./scripts/build_macos_app.sh
+# → dist/Soundcraft.app and dist/Soundcraft-macos.zip
+```
+
+The zip is **not notarized**. Tell users about right-click → Open on first launch.
+
+## `.env` (developers)
 
 ```
 REPLICATE_API_TOKEN=your_token_here
@@ -45,7 +67,7 @@ LM_STUDIO_URL=http://localhost:1234
 LM_STUDIO_MODEL=liquid/lfm2-24b-a2b
 ```
 
-LM Studio is optional (prompt refinement). Use `--raw` to skip it.
+In desktop/app mode, Settings writes Application Support instead. LM Studio is optional (`--raw` / GUI toggle skips refine).
 
 ## CLI
 
@@ -62,21 +84,24 @@ soundcraft "glitch, metallic" -m stereo-melody-large -d 15 -n 5
 | `-m` | Model (MusicGen): `melody-large`, `stereo-melody-large`, `large`, `stereo-large` | `melody-large` |
 | `-d` | Duration in seconds (MusicGen) | `30` |
 | `-n` | Number of variations | `3` |
-| `-o` | Output directory | `output/` |
+| `-o` | Output directory | `output/` (CLI) or `~/Documents/soundcraft/output/` (app) |
 | `--raw` | Skip LLM prompt refinement | off |
 
 ## Local API
 
-Same process as the GUI (`serve` / `gui`). Default: `http://127.0.0.1:8765`
+Same process as GUI / desktop app. Default: `http://127.0.0.1:8765`
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/` | Browser GUI |
+| `GET` | `/` | Browser / embedded GUI |
 | `GET` | `/health` | Liveness check |
+| `GET` | `/settings` | Masked settings + paths |
+| `PUT` | `/settings` | Save API keys / LM Studio |
+| `POST` | `/settings/open-output` | Reveal output folder |
 | `POST` | `/generate` | Sync generation |
 | `POST` | `/jobs` | Async generation (best for TD) |
 | `GET` | `/jobs/{id}` | Poll job |
-| `GET` | `/media?path=` | Stream a file under `output/` |
+| `GET` | `/media?path=` | Stream a generated file |
 
 ```bash
 curl -X POST http://127.0.0.1:8765/jobs \
@@ -96,13 +121,13 @@ Response `files` are absolute paths (load in TD via `Audio File In CHOP`, etc.).
 ## Output
 
 ```
-output/dark_ambient_drone_with_001.wav   # MusicGen
-output/energetic_pop_beat_bright_001.mp3 # Lyria3
+~/Documents/soundcraft/output/…   # desktop app
+./output/…                        # CLI / serve from a project folder
 ```
 
 ## Requirements
 
-- Python 3.10+ / [uv](https://docs.astral.sh/uv/)
+- macOS 12+ for the `.app` (or Python 3.10+ / [uv](https://docs.astral.sh/uv/) from source)
 - [Replicate API token](https://replicate.com/account/api-tokens) (MusicGen)
 - [Gemini API key](https://aistudio.google.com/apikey) (Lyria3)
 - LM Studio (optional)

@@ -1,6 +1,6 @@
 import requests
 
-from soundcraft.config import LM_STUDIO_URL, LM_STUDIO_MODEL
+from soundcraft.config import get_lm_studio_model, get_lm_studio_url
 
 SYSTEM_PROMPT = """\
 You are a music prompt engineer for MusicGen (text-to-music AI).
@@ -23,9 +23,9 @@ Example output: Dark ambient drone with deep heartbeat pulse, heavy reverb, slow
 def refine_prompt(raw_input: str) -> str:
     try:
         resp = requests.post(
-            f"{LM_STUDIO_URL}/v1/chat/completions",
+            f"{get_lm_studio_url()}/v1/chat/completions",
             json={
-                "model": LM_STUDIO_MODEL,
+                "model": get_lm_studio_model(),
                 "messages": [
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": raw_input},
