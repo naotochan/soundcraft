@@ -9,6 +9,9 @@
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Syne:wght@600;700;800&display=swap" rel="stylesheet" />
   <style>
     :root {
+      color-scheme: dark;
+
+      /* product surfaces */
       --bg: #12141a;
       --bg-elev: #1a1d26;
       --bg-soft: #222632;
@@ -17,22 +20,72 @@
       --muted: #8b93a7;
       --accent: #e8a54b;
       --accent-dim: rgba(232, 165, 75, 0.16);
+      --accent-ink: #1a1208;
+      --glow-1: #243049;
+      --glow-2: #2a2218;
       --ok: #5ecf9a;
       --err: #e86a6a;
       --run: #6aa8e8;
+
+      /* settings chrome surfaces */
+      --settings-canvas: #14161d;
+      --settings-sidebar: #0f1118;
+      --panel: #1a1d26;
+      --separator: #262c3a;
+      --wash: rgba(255, 255, 255, 0.07);
+      --scrim: rgba(6, 7, 10, 0.62);
+
+      /* settings chrome metrics */
+      --sidebar-width: 228px;
+      --window-width: 820px;
+      --window-height: 600px;
+      --page-pad-x: 28px;
+      --page-pad-y: 24px;
+      --group-spacing: 22px;
+      --corner-radius: 10px;
+      --row-pad-x: 14px;
+      --row-pad-y: 13px;
+
       --radius: 10px;
       --font-display: "Syne", system-ui, sans-serif;
       --font-mono: "IBM Plex Mono", ui-monospace, monospace;
     }
 
+    [data-theme="light"] {
+      color-scheme: light;
+
+      --bg: #f3f4f8;
+      --bg-elev: #ffffff;
+      --bg-soft: #e9ecf3;
+      --line: #d5dae5;
+      --text: #1a1e28;
+      --muted: #5f6779;
+      --accent: #b06f19;
+      --accent-dim: rgba(176, 111, 25, 0.13);
+      --accent-ink: #fff7ec;
+      --glow-1: #dde5f5;
+      --glow-2: #f5e9d6;
+      --ok: #1c8a5c;
+      --err: #bd4040;
+      --run: #2d6cb0;
+
+      --settings-canvas: #f1f2f7;
+      --settings-sidebar: #e6e9f1;
+      --panel: #ffffff;
+      --separator: #e1e4ed;
+      --wash: rgba(18, 22, 32, 0.06);
+      --scrim: rgba(28, 32, 42, 0.3);
+    }
+
     * { box-sizing: border-box; }
+    .hidden { display: none !important; }
     html, body { height: 100%; }
     body {
       margin: 0;
       color: var(--text);
       background:
-        radial-gradient(1200px 600px at 10% -10%, #243049 0%, transparent 55%),
-        radial-gradient(900px 500px at 100% 0%, #2a2218 0%, transparent 50%),
+        radial-gradient(1200px 600px at 10% -10%, var(--glow-1) 0%, transparent 55%),
+        radial-gradient(900px 500px at 100% 0%, var(--glow-2) 0%, transparent 50%),
         var(--bg);
       font-family: var(--font-mono);
       font-size: 13px;
@@ -210,7 +263,7 @@
       border: none;
       border-radius: 999px;
       background: var(--accent);
-      color: #1a1208;
+      color: var(--accent-ink);
       font-family: var(--font-display);
       font-weight: 700;
       font-size: 15px;
@@ -242,29 +295,194 @@
     }
     .warn.hidden { display: none; }
 
-    .settings-grid {
-      display: grid;
-      gap: 16px;
-      margin-top: 4px;
-    }
-
-    .settings-actions {
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-      margin-top: 18px;
-      align-items: center;
-    }
-
-    .masked {
-      color: var(--muted);
-      font-size: 12px;
-      margin-top: 6px;
-    }
-
     .ok-msg {
       color: var(--ok);
       font-size: 12px;
+    }
+
+    /* ---- settings chrome: sidebar window + panel rows ---- */
+
+    .settings-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 50;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      background: var(--scrim);
+    }
+    .settings-overlay.hidden { display: none; }
+
+    .settings-window {
+      display: grid;
+      grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+      width: min(var(--window-width), 100%);
+      height: min(var(--window-height), 100%);
+      background: var(--settings-canvas);
+      border: 1px solid var(--separator);
+      border-radius: 14px;
+      overflow: hidden;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+    }
+
+    .settings-sidebar {
+      background: var(--settings-sidebar);
+      border-right: 1px solid var(--separator);
+      padding: 16px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      overflow-y: auto;
+    }
+
+    .search-field {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--wash);
+      color: var(--text);
+      padding: 8px 10px;
+      font: inherit;
+      outline: none;
+    }
+    .search-field:focus { border-color: var(--accent); }
+
+    .sidebar-nav { display: flex; flex-direction: column; gap: 2px; }
+
+    .sidebar-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      width: 100%;
+      appearance: none;
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      font: inherit;
+      text-align: left;
+      padding: 8px 10px;
+      border-radius: 7px;
+      cursor: pointer;
+    }
+    .sidebar-item:hover { color: var(--text); background: var(--wash); }
+    .sidebar-item.active { color: var(--text); background: var(--wash); }
+    .sidebar-item .glyph { width: 16px; text-align: center; opacity: 0.8; }
+
+    .settings-main { display: flex; flex-direction: column; min-width: 0; }
+
+    .settings-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: var(--page-pad-y) var(--page-pad-x) 14px;
+    }
+
+    .page-title {
+      margin: 0;
+      font-family: var(--font-display);
+      font-size: 1.45rem;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+    }
+
+    .icon-btn {
+      appearance: none;
+      width: 28px;
+      height: 28px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: transparent;
+      color: var(--muted);
+      font: inherit;
+      line-height: 1;
+      cursor: pointer;
+    }
+    .icon-btn:hover { color: var(--accent); border-color: var(--accent); }
+
+    .settings-scroll {
+      flex: 1;
+      overflow-y: auto;
+      padding: 0 var(--page-pad-x) var(--page-pad-y);
+      display: flex;
+      flex-direction: column;
+      gap: var(--group-spacing);
+    }
+
+    .panel-group.hidden { display: none; }
+
+    .panel-heading {
+      margin: 0 0 8px;
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: color-mix(in srgb, var(--text) 45%, transparent);
+    }
+
+    .settings-panel {
+      background: var(--panel);
+      border: 1px solid var(--separator);
+      border-radius: var(--corner-radius);
+      overflow: hidden;
+    }
+
+    .row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      padding: var(--row-pad-y) var(--row-pad-x);
+    }
+    .row.hidden { display: none; }
+
+    .row-label { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+    .row-title { color: var(--text); }
+    .row-sub { color: var(--muted); font-size: 11.5px; }
+
+    .row-control { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; }
+    .row-control input[type="text"],
+    .row-control input[type="password"],
+    .row-control select { width: 280px; }
+
+    .row-value {
+      color: var(--muted);
+      font-size: 12px;
+      max-width: 320px;
+      text-align: right;
+      word-break: break-all;
+    }
+
+    .row-separator { height: 1px; background: var(--separator); margin-left: var(--row-pad-x); }
+    .row-separator.hidden { display: none; }
+
+    .settings-foot {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 10px;
+      padding: 12px var(--page-pad-x);
+      border-top: 1px solid var(--separator);
+    }
+
+    .settings-empty {
+      color: var(--muted);
+      text-align: center;
+      padding: 32px 0;
+    }
+    .settings-empty.hidden { display: none; }
+
+    @media (max-width: 720px) {
+      .settings-overlay { padding: 12px; }
+      .settings-window { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); height: 100%; }
+      .settings-sidebar { flex-direction: column; gap: 10px; border-right: none; border-bottom: 1px solid var(--separator); }
+      .settings-sidebar .sidebar-nav { flex-direction: row; flex-wrap: wrap; }
+      .settings-sidebar .sidebar-item { width: auto; }
+      .row { flex-direction: column; align-items: flex-start; }
+      .row-control input[type="text"],
+      .row-control input[type="password"],
+      .row-control select { width: 100%; }
+      .row-control { width: 100%; }
     }
 
     .results {
@@ -387,40 +605,6 @@
       </div>
     </header>
 
-    <section class="panel hidden" id="settingsPanel">
-      <h2>Settings</h2>
-      <p class="hint">API keys are saved on this Mac (Application Support). Leave a field blank to keep the current value.</p>
-      <div class="settings-grid">
-        <div>
-          <label class="field-label" for="replicateToken">Replicate API Token (MusicGen)</label>
-          <input id="replicateToken" type="password" autocomplete="off" placeholder="r8_…" />
-          <div class="masked" id="replicateMasked"></div>
-        </div>
-        <div>
-          <label class="field-label" for="geminiKey">Gemini API Key (Lyria3)</label>
-          <input id="geminiKey" type="password" autocomplete="off" placeholder="AIza…" />
-          <div class="masked" id="geminiMasked"></div>
-        </div>
-        <div>
-          <label class="field-label" for="lmUrl">LM Studio URL (optional)</label>
-          <input id="lmUrl" type="text" placeholder="http://localhost:1234" />
-        </div>
-        <div>
-          <label class="field-label" for="lmModel">LM Studio Model (optional)</label>
-          <input id="lmModel" type="text" placeholder="liquid/lfm2-24b-a2b" />
-        </div>
-        <div>
-          <label class="field-label">Output folder</label>
-          <div class="meta" id="outputDir">—</div>
-        </div>
-      </div>
-      <div class="settings-actions">
-        <button class="primary" type="button" id="saveSettingsBtn">Save</button>
-        <button class="ghost" type="button" id="openOutputBtn">Open output folder</button>
-        <span class="ok-msg hidden" id="settingsSaved">Saved</span>
-      </div>
-    </section>
-
     <section class="panel" id="composePanel">
       <label class="field-label" for="prompt">Prompt</label>
       <textarea id="prompt" placeholder="暗い、鼓動、インスタレーション / dark ambient drone, heavy reverb"></textarea>
@@ -470,11 +654,153 @@
 
     <footer>
       <span>Local API also at <code id="apiUrl">/health</code> · TD: <code>POST /jobs</code></span>
-      <span>v0.4.0</span>
+      <span>v0.5.0</span>
     </footer>
   </div>
 
+  <div class="settings-overlay hidden" id="settingsOverlay" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+    <div class="settings-window">
+      <aside class="settings-sidebar">
+        <input class="search-field" id="settingsSearch" type="search" placeholder="Search / 検索" autocomplete="off" />
+        <nav class="sidebar-nav" id="settingsNav">
+          <button class="sidebar-item active" type="button" data-section="appearance"><span class="glyph">◐</span>Appearance</button>
+          <button class="sidebar-item" type="button" data-section="backends"><span class="glyph">◆</span>Backends</button>
+          <button class="sidebar-item" type="button" data-section="local"><span class="glyph">▤</span>Local tools</button>
+          <button class="sidebar-item" type="button" data-section="output"><span class="glyph">▼</span>Output</button>
+          <button class="sidebar-item" type="button" data-section="about"><span class="glyph">◇</span>About</button>
+        </nav>
+      </aside>
+
+      <div class="settings-main">
+        <div class="settings-head">
+          <h2 class="page-title" id="settingsTitle">Settings</h2>
+          <button class="icon-btn" type="button" id="settingsClose" aria-label="Close settings">✕</button>
+        </div>
+
+        <div class="settings-scroll" id="settingsScroll">
+          <section class="panel-group" data-section="appearance">
+            <h3 class="panel-heading">Appearance</h3>
+            <div class="settings-panel">
+              <div class="row" data-keywords="theme appearance dark light system テーマ 外観 ダーク ライト">
+                <div class="row-label">
+                  <span class="row-title">Theme</span>
+                  <span class="row-sub">すぐ反映 / Applies immediately</span>
+                </div>
+                <div class="row-control">
+                  <select id="appearanceSelect">
+                    <option value="system">System / システム</option>
+                    <option value="light">Light / ライト</option>
+                    <option value="dark">Dark / ダーク</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel-group" data-section="backends">
+            <h3 class="panel-heading">Backends</h3>
+            <div class="settings-panel">
+              <div class="row" data-keywords="replicate musicgen token api key リプリケイト トークン">
+                <div class="row-label">
+                  <span class="row-title">Replicate API Token</span>
+                  <span class="row-sub" id="replicateMasked">MusicGen</span>
+                </div>
+                <div class="row-control">
+                  <input id="replicateToken" type="password" autocomplete="off" placeholder="r8_…" />
+                </div>
+              </div>
+              <div class="row-separator"></div>
+              <div class="row" data-keywords="gemini lyria3 api key google ジェミニ キー">
+                <div class="row-label">
+                  <span class="row-title">Gemini API Key</span>
+                  <span class="row-sub" id="geminiMasked">Lyria3</span>
+                </div>
+                <div class="row-control">
+                  <input id="geminiKey" type="password" autocomplete="off" placeholder="AIza…" />
+                </div>
+              </div>
+              <div class="row-separator"></div>
+              <div class="row" data-keywords="storage keychain application support 保存先 キー 保存">
+                <div class="row-label">
+                  <span class="row-title">Where keys are stored</span>
+                  <span class="row-sub">空欄で保存すれば現在値を維持 / Blank keeps current</span>
+                </div>
+                <div class="row-control"><span class="row-value">Application Support</span></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel-group" data-section="local">
+            <h3 class="panel-heading">Local tools</h3>
+            <div class="settings-panel">
+              <div class="row" data-keywords="lm studio url endpoint refine プロンプト 整形 ローカル">
+                <div class="row-label">
+                  <span class="row-title">LM Studio URL</span>
+                  <span class="row-sub">プロンプト整形に使用（任意）/ Optional prompt refine</span>
+                </div>
+                <div class="row-control">
+                  <input id="lmUrl" type="text" placeholder="http://localhost:1234" />
+                </div>
+              </div>
+              <div class="row-separator"></div>
+              <div class="row" data-keywords="lm studio model モデル ローカル llm">
+                <div class="row-label">
+                  <span class="row-title">LM Studio Model</span>
+                  <span class="row-sub">未設定なら整形をスキップ / Skipped when empty</span>
+                </div>
+                <div class="row-control">
+                  <input id="lmModel" type="text" placeholder="liquid/lfm2-24b-a2b" />
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel-group" data-section="output">
+            <h3 class="panel-heading">Output</h3>
+            <div class="settings-panel">
+              <div class="row" data-keywords="output folder finder 出力 フォルダ 保存先">
+                <div class="row-label">
+                  <span class="row-title">Output folder</span>
+                  <span class="row-sub" id="outputDir">—</span>
+                </div>
+                <div class="row-control">
+                  <button class="ghost" type="button" id="openOutputBtn">Open</button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel-group" data-section="about">
+            <h3 class="panel-heading">About</h3>
+            <div class="settings-panel">
+              <div class="row" data-keywords="version バージョン">
+                <div class="row-label"><span class="row-title">Version</span></div>
+                <div class="row-control"><span class="row-value" id="aboutVersion">—</span></div>
+              </div>
+              <div class="row-separator"></div>
+              <div class="row" data-keywords="api endpoint health touchdesigner td エンドポイント">
+                <div class="row-label">
+                  <span class="row-title">Local API</span>
+                  <span class="row-sub">TouchDesigner などから <code>POST /jobs</code></span>
+                </div>
+                <div class="row-control"><span class="row-value" id="aboutEndpoint">—</span></div>
+              </div>
+            </div>
+          </section>
+
+          <div class="settings-empty hidden" id="settingsEmpty">一致する設定はありません / No matching settings</div>
+        </div>
+
+        <div class="settings-foot">
+          <span class="ok-msg hidden" id="settingsSaved">Saved</span>
+          <button class="primary" type="button" id="saveSettingsBtn">Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script>
+    const APP_VERSION = "0.5.0";
     const $ = (id) => document.getElementById(id);
     const jobsEl = $("jobs");
     const known = new Map();
@@ -535,11 +861,11 @@
       if (!res.ok) throw new Error("settings failed");
       settingsCache = await res.json();
       $("replicateMasked").textContent = settingsCache.replicate_api_token_set
-        ? "Saved: " + settingsCache.replicate_api_token_masked
-        : "Not set";
+        ? "MusicGen · Saved: " + settingsCache.replicate_api_token_masked
+        : "MusicGen · Not set";
       $("geminiMasked").textContent = settingsCache.gemini_api_key_set
-        ? "Saved: " + settingsCache.gemini_api_key_masked
-        : "Not set";
+        ? "Lyria3 · Saved: " + settingsCache.gemini_api_key_masked
+        : "Lyria3 · Not set";
       $("lmUrl").value = settingsCache.lm_studio_url || "";
       $("lmModel").value = settingsCache.lm_studio_model || "";
       $("outputDir").textContent = settingsCache.output_dir || "—";
@@ -692,16 +1018,99 @@
       }
     }
 
+    const APPEARANCE_KEY = "appAppearance";
+
+    function resolveAppearance(pref) {
+      if (pref === "light" || pref === "dark") return pref;
+      return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+    }
+
+    function applyAppearance(pref) {
+      document.documentElement.dataset.theme = resolveAppearance(pref);
+    }
+
+    function initAppearance() {
+      const pref = localStorage.getItem(APPEARANCE_KEY) || "system";
+      $("appearanceSelect").value = pref;
+      applyAppearance(pref);
+      window.matchMedia("(prefers-color-scheme: light)").addEventListener("change", () => {
+        const current = localStorage.getItem(APPEARANCE_KEY) || "system";
+        if (current === "system") applyAppearance(current);
+      });
+    }
+
+    let currentSection = "appearance";
+
+    function selectSection(section) {
+      currentSection = section;
+      document.querySelectorAll("#settingsNav .sidebar-item").forEach((item) => {
+        item.classList.toggle("active", item.dataset.section === section);
+      });
+      document.querySelectorAll(".panel-group").forEach((group) => {
+        group.classList.toggle("hidden", group.dataset.section !== section);
+      });
+      document.querySelectorAll(".row, .row-separator").forEach((el) => el.classList.remove("hidden"));
+      $("settingsEmpty").classList.add("hidden");
+      $("settingsScroll").scrollTop = 0;
+    }
+
+    function filterSettings(term) {
+      const q = term.trim().toLowerCase();
+      if (!q) {
+        selectSection(currentSection);
+        return;
+      }
+
+      document.querySelectorAll("#settingsNav .sidebar-item").forEach((item) => item.classList.remove("active"));
+
+      let matches = 0;
+      document.querySelectorAll(".panel-group").forEach((group) => {
+        let groupMatches = 0;
+        group.querySelectorAll(".row").forEach((row) => {
+          const haystack = (row.textContent + " " + (row.dataset.keywords || "")).toLowerCase();
+          const hit = haystack.includes(q);
+          row.classList.toggle("hidden", !hit);
+          if (hit) groupMatches += 1;
+        });
+        group.querySelectorAll(".row-separator").forEach((sep) => sep.classList.add("hidden"));
+        group.classList.toggle("hidden", groupMatches === 0);
+        matches += groupMatches;
+      });
+      $("settingsEmpty").classList.toggle("hidden", matches > 0);
+    }
+
     function showSettings(open) {
-      const panel = $("settingsPanel");
+      const overlay = $("settingsOverlay");
       const toggle = $("settingsToggle");
-      if (open === undefined) open = panel.classList.contains("hidden");
-      panel.classList.toggle("hidden", !open);
+      if (open === undefined) open = overlay.classList.contains("hidden");
+      overlay.classList.toggle("hidden", !open);
       toggle.classList.toggle("active", open);
-      toggle.textContent = open ? "Close settings" : "Settings";
+      if (open) {
+        $("aboutVersion").textContent = "v" + APP_VERSION;
+        $("aboutEndpoint").textContent = location.origin;
+        $("settingsSearch").focus();
+      }
     }
 
     $("settingsToggle").addEventListener("click", () => showSettings());
+    $("settingsClose").addEventListener("click", () => showSettings(false));
+    $("settingsOverlay").addEventListener("mousedown", (e) => {
+      if (e.target === $("settingsOverlay")) showSettings(false);
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && !$("settingsOverlay").classList.contains("hidden")) showSettings(false);
+    });
+    $("settingsNav").addEventListener("click", (e) => {
+      const item = e.target.closest(".sidebar-item");
+      if (!item) return;
+      $("settingsSearch").value = "";
+      selectSection(item.dataset.section);
+    });
+    $("settingsSearch").addEventListener("input", (e) => filterSettings(e.target.value));
+    $("appearanceSelect").addEventListener("change", (e) => {
+      localStorage.setItem(APPEARANCE_KEY, e.target.value);
+      applyAppearance(e.target.value);
+    });
     $("saveSettingsBtn").addEventListener("click", saveSettings);
     $("openOutputBtn").addEventListener("click", async () => {
       try {
@@ -718,6 +1127,8 @@
     });
 
     $("apiUrl").textContent = location.origin + "/health";
+    initAppearance();
+    selectSection("appearance");
     syncBackendUi();
     checkHealth();
     loadSettings().catch(() => {});

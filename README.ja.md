@@ -8,6 +8,10 @@
 テキスト →（任意）LM Studio 整形 → MusicGen or Lyria3 → 音声ファイル
 ```
 
+<p align="center">
+  <img src="docs/demo/gui.jpg" alt="soundcraft — プロンプトから生成結果まで" width="900" />
+</p>
+
 ## みんな向け（macOS アプリ）
 
 1. [Releases](https://github.com/naotochan/soundcraft/releases) から **Soundcraft-macos.zip** をダウンロード

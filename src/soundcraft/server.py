@@ -33,7 +33,7 @@ from soundcraft.config import (
 from soundcraft.pipeline import run_generate
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
-APP_VERSION = "0.4.0"
+APP_VERSION = "0.5.0"
 
 app = FastAPI(
     title="soundcraft",

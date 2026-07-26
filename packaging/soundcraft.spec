@@ -92,8 +92,8 @@ app = BUNDLE(
     info_plist={
         "CFBundleName": "Soundcraft",
         "CFBundleDisplayName": "Soundcraft",
-        "CFBundleShortVersionString": "0.4.0",
-        "CFBundleVersion": "0.4.0",
+        "CFBundleShortVersionString": "0.5.0",
+        "CFBundleVersion": "0.5.0",
         "NSHighResolutionCapable": True,
         "LSMinimumSystemVersion": "12.0",
         "NSAppTransportSecurity": {

@@ -8,6 +8,10 @@ CLI, desktop app, local GUI, and API for generating instrumental music from text
 Text → (optional) LM Studio refine → MusicGen or Lyria3 → audio files
 ```
 
+<p align="center">
+  <img src="docs/demo/gui.jpg" alt="soundcraft — prompt to generated audio" width="900" />
+</p>
+
 ## For everyone (macOS app)
 
 1. Download **Soundcraft-macos.zip** from [Releases](https://github.com/naotochan/soundcraft/releases)
