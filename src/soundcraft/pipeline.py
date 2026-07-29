@@ -11,6 +11,7 @@ from soundcraft.config import (
 )
 from soundcraft.generate import generate_music
 from soundcraft.generate_lyria import generate_music_lyria
+from soundcraft.library import write_track_meta
 from soundcraft.prompt import refine_prompt
 
 
@@ -46,7 +47,19 @@ def run_generate(
                 duration=duration,
                 output_dir=out,
             )
-        files.append(path.resolve())
+        resolved = path.resolve()
+        try:
+            write_track_meta(
+                resolved,
+                input_text=text,
+                prompt=prompt,
+                backend=backend,
+                model=None if backend == "lyria3" else model,
+                duration=None if backend == "lyria3" else duration,
+            )
+        except OSError:
+            pass
+        files.append(resolved)
 
     return GenerateResult(
         input=text,

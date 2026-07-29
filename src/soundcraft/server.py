@@ -30,10 +30,11 @@ from soundcraft.config import (
     read_settings_public,
     save_settings,
 )
+from soundcraft.library import library_roots, list_tracks
 from soundcraft.pipeline import run_generate
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
-APP_VERSION = "0.5.0"
+APP_VERSION = "0.6.0"
 
 app = FastAPI(
     title="soundcraft",
@@ -102,11 +103,7 @@ def _validate_request(req: GenerateRequest) -> None:
 
 
 def _allowed_media_roots() -> list[Path]:
-    roots = [default_output_dir().expanduser().resolve()]
-    cwd_output = (Path.cwd() / "output").resolve()
-    if cwd_output not in roots:
-        roots.append(cwd_output)
-    return roots
+    return library_roots()
 
 
 def _is_under(path: Path, root: Path) -> bool:
@@ -289,6 +286,17 @@ def list_jobs() -> list[JobResponse]:
         return [_job_to_response(j) for j in jobs]
 
 
+@app.get("/library")
+def get_library(limit: int = Query(200, ge=1, le=1000)) -> dict:
+    """List generated tracks on disk (newest first), with optional sidecar meta."""
+    tracks = list_tracks(limit=limit)
+    return {
+        "tracks": tracks,
+        "count": len(tracks),
+        "roots": [str(r) for r in library_roots()],
+    }
+
+
 @app.get("/media")
 def media(path: str = Query(..., min_length=1)) -> FileResponse:
     """Serve a generated audio file for in-browser playback (output/ only)."""
@@ -329,6 +337,7 @@ def run_server(
     print("  POST /generate   (sync)")
     print("  POST /jobs       (async)")
     print("  GET  /jobs/{id}")
+    print("  GET  /library")
     print("  GET  /media?path=")
     print("  GET  /settings")
     print("  PUT  /settings")

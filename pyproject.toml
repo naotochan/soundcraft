@@ -1,6 +1,6 @@
 [project]
 name = "soundcraft"
-version = "0.5.0"
+version = "0.6.0"
 description = "CLI, GUI, desktop app, and local API for generating instrumental music via MusicGen and Lyria3"
 requires-python = ">=3.10"
 dependencies = [
