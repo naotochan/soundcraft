@@ -133,6 +133,21 @@ class TestMedia:
         assert resp.status_code == 200
         assert resp.headers["content-type"].startswith("audio/")
 
+    def test_serves_inline_so_browsers_will_play_it(self, client, output_dir: Path):
+        """An `attachment` disposition makes Chrome stall an <audio> load."""
+        files = client.post(
+            "/generate", json={"prompt": "x", "backend": "fake", "raw": True}
+        ).json()["files"]
+        resp = client.get("/media", params={"path": files[0]})
+        assert resp.headers["content-disposition"].startswith("inline")
+
+    def test_download_flag_switches_to_attachment(self, client, output_dir: Path):
+        files = client.post(
+            "/generate", json={"prompt": "x", "backend": "fake", "raw": True}
+        ).json()["files"]
+        resp = client.get("/media", params={"path": files[0], "download": "1"})
+        assert resp.headers["content-disposition"].startswith("attachment")
+
     def test_refuses_a_path_outside_the_library(self, client, isolated_env: Path):
         secret = isolated_env / "home" / ".ssh_id"
         secret.parent.mkdir(parents=True, exist_ok=True)

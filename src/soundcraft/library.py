@@ -148,7 +148,9 @@ def track_from_file(audio: Path) -> dict[str, Any]:
         "title": prompt or input_text or _title_from_name(audio.name),
         "input": input_text,
         "prompt": prompt,
-        "backend": str(meta.get("backend") or "unknown"),
+        # Empty rather than guessed: a file with no sidecar predates the
+        # library, and inventing a backend for it would be a lie the UI repeats.
+        "backend": str(meta.get("backend") or ""),
         "params": params,
         "duration": params.get("duration") or meta.get("duration"),
         "model": params.get("model") or meta.get("model"),

@@ -293,14 +293,27 @@ def remove_track(path: str = Query(..., min_length=1)) -> dict[str, str]:
 
 
 @app.get("/media", dependencies=[Auth])
-def media(path: str = Query(..., min_length=1)) -> FileResponse:
-    """Stream a generated file. Restricted to the library directories."""
+def media(
+    path: str = Query(..., min_length=1),
+    download: bool = Query(False, description="Send as an attachment instead of inline"),
+) -> FileResponse:
+    """Stream a generated file. Restricted to the library directories.
+
+    Served inline by default: an `attachment` disposition makes Chrome stall a
+    `<audio>` load instead of playing it.
+    """
     target = Path(path).expanduser().resolve()
     if not is_in_library(target):
         raise HTTPException(403, "Path is outside the library directories")
     if not target.is_file():
         raise HTTPException(404, f"File not found: {target}")
-    return FileResponse(target, media_type=media_type_for(target), filename=target.name)
+
+    disposition = "attachment" if download else "inline"
+    return FileResponse(
+        target,
+        media_type=media_type_for(target),
+        headers={"Content-Disposition": f'{disposition}; filename="{target.name}"'},
+    )
 
 
 @app.get("/workflows", dependencies=[Auth])
