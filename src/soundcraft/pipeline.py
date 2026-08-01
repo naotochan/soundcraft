@@ -1,18 +1,22 @@
-"""Shared generation pipeline used by CLI and API server."""
+"""Generation pipeline shared by the CLI, the HTTP API and the GUI."""
 
-from dataclasses import dataclass
+from __future__ import annotations
+
+from collections.abc import Callable
+from contextlib import suppress
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
-from soundcraft.config import (
-    DEFAULT_BACKEND,
-    DEFAULT_DURATION,
-    DEFAULT_MODEL,
-    default_output_dir,
-)
-from soundcraft.generate import generate_music
-from soundcraft.generate_lyria import generate_music_lyria
 from soundcraft.library import write_track_meta
+from soundcraft.naming import unique_path
+from soundcraft.paths import default_output_dir
 from soundcraft.prompt import refine_prompt
+from soundcraft.providers import registry
+from soundcraft.providers.base import GenerationRequest, ProviderError
+
+#: Called as ``progress(done, total, path)`` after each clip is written.
+Progress = Callable[[int, int, Path], None]
 
 
 @dataclass
@@ -20,50 +24,65 @@ class GenerateResult:
     input: str
     prompt: str
     backend: str
-    files: list[Path]
+    params: dict[str, Any]
+    files: list[Path] = field(default_factory=list)
+
+
+def resolve_backend(backend: str | None) -> str:
+    """Normalise a backend id, falling back to the first ready provider."""
+    if backend and registry.has(backend):
+        return backend
+    if backend:
+        raise ProviderError(
+            f"Unknown backend {backend!r}. Available: {', '.join(registry.ids())}"
+        )
+    return registry.default_id()
 
 
 def run_generate(
     text: str,
     *,
-    backend: str = DEFAULT_BACKEND,
-    model: str = DEFAULT_MODEL,
-    duration: int = DEFAULT_DURATION,
+    backend: str | None = None,
+    params: dict[str, Any] | None = None,
     count: int = 1,
     output_dir: Path | None = None,
     raw: bool = False,
+    progress: Progress | None = None,
 ) -> GenerateResult:
-    out = output_dir if output_dir is not None else default_output_dir()
+    """Refine the prompt once, then generate ``count`` clips with one provider."""
+    provider = registry.get(resolve_backend(backend))
+    resolved_params = provider.coerce_params(params)
+
+    out = Path(output_dir) if output_dir is not None else default_output_dir()
     prompt = text if raw else refine_prompt(text)
+    request = GenerationRequest(prompt=prompt, params=resolved_params)
 
     files: list[Path] = []
-    for _ in range(count):
-        if backend == "lyria3":
-            path = generate_music_lyria(prompt=prompt, output_dir=out)
-        else:
-            path = generate_music(
-                prompt=prompt,
-                model_version=model,
-                duration=duration,
-                output_dir=out,
-            )
+    for index in range(count):
+        audio = provider.generate(request)
+        path = unique_path(out, prompt, audio.suffix)
+        path.write_bytes(audio.data)
         resolved = path.resolve()
-        try:
+
+        # A sidecar that cannot be written must never cost us the audio.
+        with suppress(OSError):
             write_track_meta(
                 resolved,
                 input_text=text,
                 prompt=prompt,
-                backend=backend,
-                model=None if backend == "lyria3" else model,
-                duration=None if backend == "lyria3" else duration,
+                backend=provider.id,
+                params=resolved_params,
+                extra=audio.extra,
             )
-        except OSError:
-            pass
+
         files.append(resolved)
+        if progress is not None:
+            progress(index + 1, count, resolved)
 
     return GenerateResult(
         input=text,
         prompt=prompt,
-        backend=backend,
+        backend=provider.id,
+        params=resolved_params,
         files=files,
     )

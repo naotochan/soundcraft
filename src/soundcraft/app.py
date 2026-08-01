@@ -5,7 +5,7 @@ from __future__ import annotations
 import socket
 import threading
 import time
-from typing import Callable
+from collections.abc import Callable
 
 from soundcraft.config import (
     DEFAULT_SERVER_HOST,

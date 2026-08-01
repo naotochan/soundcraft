@@ -1,4 +1,9 @@
-"""Disk-backed generation library (Suno/Udio-style history)."""
+"""Disk-backed generation library (Suno/Udio-style history).
+
+The audio files on disk are the source of truth; a JSON sidecar next to each one
+carries the prompt and settings it was made with. Delete the audio and the
+history entry goes with it — nothing to keep in sync.
+"""
 
 from __future__ import annotations
 
@@ -7,14 +12,27 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from soundcraft.config import APP_NAME, default_output_dir
+from soundcraft.paths import APP_NAME, default_output_dir, documents_dir
 
-AUDIO_SUFFIXES = {".wav", ".mp3"}
-META_VERSION = 1
+AUDIO_SUFFIXES = {".wav", ".mp3", ".flac", ".ogg", ".m4a", ".opus", ".aiff"}
+MEDIA_TYPES = {
+    ".wav": "audio/wav",
+    ".mp3": "audio/mpeg",
+    ".flac": "audio/flac",
+    ".ogg": "audio/ogg",
+    ".m4a": "audio/mp4",
+    ".opus": "audio/opus",
+    ".aiff": "audio/aiff",
+}
+META_VERSION = 2
+
+
+def media_type_for(path: Path) -> str:
+    return MEDIA_TYPES.get(path.suffix.lower(), "application/octet-stream")
 
 
 def library_roots() -> list[Path]:
-    """Directories that may contain generated audio."""
+    """Directories that may contain generated audio, most relevant first."""
     roots: list[Path] = []
     seen: set[Path] = set()
 
@@ -23,14 +41,13 @@ def library_roots() -> list[Path]:
             resolved = path.expanduser().resolve()
         except OSError:
             return
-        if resolved in seen:
-            return
-        seen.add(resolved)
-        roots.append(resolved)
+        if resolved not in seen:
+            seen.add(resolved)
+            roots.append(resolved)
 
     add(default_output_dir())
     add(Path.cwd() / "output")
-    add(Path.home() / "Documents" / APP_NAME / "output")
+    add(documents_dir() / APP_NAME / "output")
     return roots
 
 
@@ -44,51 +61,57 @@ def write_track_meta(
     input_text: str,
     prompt: str,
     backend: str,
-    model: str | None = None,
-    duration: int | None = None,
+    params: dict[str, Any] | None = None,
+    extra: dict[str, Any] | None = None,
 ) -> Path:
-    """Write a sidecar JSON next to an audio file."""
+    """Write the sidecar JSON that makes a file reproducible."""
     payload: dict[str, Any] = {
         "version": META_VERSION,
         "input": input_text,
         "prompt": prompt,
         "backend": backend,
+        "params": _jsonable(params or {}),
         "created_at": datetime.now(timezone.utc).isoformat(),
         "file": audio.name,
     }
-    if model:
-        payload["model"] = model
-    if duration is not None:
-        payload["duration"] = duration
+    if extra:
+        payload["extra"] = _jsonable(extra)
 
     path = meta_path_for(audio)
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
     return path
 
 
-def _read_meta(audio: Path) -> dict[str, Any] | None:
+def _jsonable(data: dict[str, Any]) -> dict[str, Any]:
+    """Drop anything that would make the sidecar unwritable."""
+    clean: dict[str, Any] = {}
+    for key, value in data.items():
+        if value is None or isinstance(value, (str, int, float, bool)):
+            clean[key] = value
+        else:
+            clean[key] = str(value)
+    return clean
+
+
+def _read_meta(audio: Path) -> dict[str, Any]:
     path = meta_path_for(audio)
     if not path.is_file():
-        return None
+        return {}
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return None
-    return data if isinstance(data, dict) else None
-
-
-def _guess_backend(audio: Path) -> str:
-    return "lyria3" if audio.suffix.lower() == ".mp3" else "musicgen"
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 def _title_from_name(name: str) -> str:
     stem = Path(name).stem
-    # strip trailing _001 style sequence
-    parts = stem.rsplit("_", 1)
-    if len(parts) == 2 and parts[1].isdigit():
-        stem = parts[0]
-    title = stem.replace("_", " ").strip()
-    return title or name
+    head, _, tail = stem.rpartition("_")
+    if head and tail.isdigit():
+        stem = head
+    return stem.replace("_", " ").strip() or name
 
 
 def _mtime_iso(path: Path) -> str:
@@ -108,7 +131,7 @@ def _format_size(n: int) -> str:
 
 
 def track_from_file(audio: Path) -> dict[str, Any]:
-    meta = _read_meta(audio) or {}
+    meta = _read_meta(audio)
     try:
         size = audio.stat().st_size
     except OSError:
@@ -116,21 +139,20 @@ def track_from_file(audio: Path) -> dict[str, Any]:
 
     prompt = str(meta.get("prompt") or "")
     input_text = str(meta.get("input") or "")
-    backend = str(meta.get("backend") or _guess_backend(audio))
-    created = str(meta.get("created_at") or _mtime_iso(audio))
-    title = prompt or input_text or _title_from_name(audio.name)
+    params = meta.get("params") if isinstance(meta.get("params"), dict) else {}
 
     return {
-        "id": str(audio.resolve()),
-        "path": str(audio.resolve()),
+        "id": str(audio),
+        "path": str(audio),
         "name": audio.name,
-        "title": title,
+        "title": prompt or input_text or _title_from_name(audio.name),
         "input": input_text,
         "prompt": prompt,
-        "backend": backend,
-        "model": meta.get("model"),
-        "duration": meta.get("duration"),
-        "created_at": created,
+        "backend": str(meta.get("backend") or "unknown"),
+        "params": params,
+        "duration": params.get("duration") or meta.get("duration"),
+        "model": params.get("model") or meta.get("model"),
+        "created_at": str(meta.get("created_at") or _mtime_iso(audio)),
         "size": size,
         "size_label": _format_size(size),
         "format": audio.suffix.lower().lstrip(".") or "audio",
@@ -138,9 +160,9 @@ def track_from_file(audio: Path) -> dict[str, Any]:
     }
 
 
-def list_tracks(*, limit: int = 200) -> list[dict[str, Any]]:
+def list_tracks(*, limit: int = 200, backend: str | None = None) -> list[dict[str, Any]]:
     """Scan library roots for audio files, newest first."""
-    found: dict[Path, Path] = {}
+    found: set[Path] = set()
     for root in library_roots():
         if not root.is_dir():
             continue
@@ -149,16 +171,37 @@ def list_tracks(*, limit: int = 200) -> list[dict[str, Any]]:
         except OSError:
             continue
         for entry in entries:
-            if not entry.is_file():
-                continue
-            if entry.suffix.lower() not in AUDIO_SUFFIXES:
+            if entry.suffix.lower() not in AUDIO_SUFFIXES or not entry.is_file():
                 continue
             try:
-                resolved = entry.resolve()
+                found.add(entry.resolve())
             except OSError:
                 continue
-            found[resolved] = entry
 
     tracks = [track_from_file(path) for path in found]
+    if backend:
+        tracks = [t for t in tracks if t["backend"] == backend]
     tracks.sort(key=lambda t: t.get("created_at") or "", reverse=True)
     return tracks[: max(1, min(limit, 1000))]
+
+
+def is_in_library(path: Path) -> bool:
+    """True when ``path`` sits inside one of the library roots."""
+    for root in library_roots():
+        try:
+            path.relative_to(root)
+            return True
+        except ValueError:
+            continue
+    return False
+
+
+def delete_track(path: Path) -> None:
+    """Remove an audio file and its sidecar. Refuses paths outside the library."""
+    target = path.expanduser().resolve()
+    if not is_in_library(target):
+        raise ValueError(f"Refusing to delete outside the library: {target}")
+    if target.suffix.lower() not in AUDIO_SUFFIXES:
+        raise ValueError(f"Not an audio file: {target}")
+    target.unlink(missing_ok=True)
+    meta_path_for(target).unlink(missing_ok=True)
