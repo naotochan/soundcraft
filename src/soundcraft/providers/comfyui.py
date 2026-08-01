@@ -100,8 +100,8 @@ class ComfyUIProvider(Provider):
             key="COMFYUI_WORKFLOW",
             label="Default workflow",
             help=(
-                "Filename inside the workflows folder, or an absolute path to a "
-                "workflow exported with Workflow → Export (API)."
+                "Filename inside the workflows folder — export it from ComfyUI "
+                "with Workflow → Export (API)."
             ),
             placeholder="ace-step.json",
         ),
@@ -201,6 +201,12 @@ class ComfyUIProvider(Provider):
     # -- workflow handling -----------------------------------------------
 
     def resolve_workflow(self, name: str | None) -> Path:
+        """Locate the workflow to run, confined to the workflows folder.
+
+        The name arrives from an HTTP request, and the file it selects is read
+        and forwarded to COMFYUI_URL — so it must not be able to address
+        anything outside the folder the user put workflows in.
+        """
         chosen = (name or settings.get("COMFYUI_WORKFLOW")).strip()
         if not chosen:
             candidates = self.available_workflows()
@@ -211,11 +217,14 @@ class ComfyUIProvider(Provider):
                 )
             return candidates[0]
 
-        path = Path(chosen).expanduser()
-        if not path.is_absolute():
-            path = workflows_dir() / path
+        root = workflows_dir().resolve()
+        path = (root / Path(chosen).name).resolve()
+        if path.parent != root:
+            raise ProviderUnavailable(f"Workflow must live inside {root}")
         if not path.is_file():
-            raise ProviderUnavailable(f"Workflow not found: {path}")
+            raise ProviderUnavailable(
+                f"Workflow not found: {path.name}. Put it in {root}."
+            )
         return path
 
     def load_workflow(self, path: Path) -> dict[str, Any]:
@@ -252,16 +261,29 @@ class ComfyUIProvider(Provider):
 
         done = {"prompt": False, "negative": False, "seed": False, "duration": False}
 
+        def apply_marker(node: dict[str, Any], name: str, keys, value) -> None:
+            """A marked node must receive the value or the run must stop.
+
+            Falling back to inference here would quietly write the prompt into
+            some other node, and the user would have no way to see why.
+            """
+            if done[name] or not _marked(node, name):
+                return
+            if not _set_first(node, keys, value):
+                raise ProviderError(
+                    f"The node titled 'soundcraft:{name}' has no writable input "
+                    f"among {', '.join(keys)}. Move the marker to the node that "
+                    "actually holds that value."
+                )
+            done[name] = True
+
         # Pass 1 — explicit soundcraft: markers.
         for _, node in ordered:
-            if _marked(node, "prompt") and not done["prompt"]:
-                done["prompt"] = _set_first(node, PROMPT_KEYS, prompt)
-            if _marked(node, "negative") and not done["negative"]:
-                done["negative"] = _set_first(node, NEGATIVE_KEYS, negative)
-            if _marked(node, "seed") and not done["seed"]:
-                done["seed"] = _set_first(node, SEED_KEYS, seed)
-            if _marked(node, "duration") and not done["duration"] and duration:
-                done["duration"] = _set_first(node, DURATION_KEYS, duration)
+            apply_marker(node, "prompt", PROMPT_KEYS, prompt)
+            apply_marker(node, "negative", NEGATIVE_KEYS, negative)
+            apply_marker(node, "seed", SEED_KEYS, seed)
+            if duration:
+                apply_marker(node, "duration", DURATION_KEYS, duration)
 
         # Pass 2 — infer from conventional input names.
         for _, node in ordered:
@@ -321,7 +343,16 @@ class ComfyUIProvider(Provider):
         if resp.status_code >= 400:
             raise ProviderError(f"ComfyUI rejected the workflow: {_detail(resp)}")
 
-        payload = resp.json()
+        try:
+            payload = resp.json()
+        except ValueError as e:
+            # requests' JSONDecodeError subclasses OSError, which would
+            # otherwise be reported as a disk error further up.
+            raise ProviderError(
+                f"ComfyUI at {base} did not return JSON. Is that really ComfyUI?"
+            ) from e
+        if not isinstance(payload, dict):
+            raise ProviderError(f"Unexpected response from ComfyUI: {payload!r:.200}")
         if payload.get("node_errors"):
             raise ProviderError(f"ComfyUI node errors: {payload['node_errors']}")
         prompt_id = payload.get("prompt_id")
@@ -354,10 +385,20 @@ class ComfyUIProvider(Provider):
                     headers=self._headers(),
                     timeout=30,
                 )
+                # A 4xx will never become a 2xx by waiting; polling for the
+                # full timeout would hide the real reason behind "too slow".
+                if resp.status_code in (401, 403):
+                    raise ProviderUnavailable(
+                        "ComfyUI rejected the auth token. Check COMFYUI_API_KEY in Settings."
+                    )
+                if resp.status_code == 404:
+                    raise ProviderError(
+                        f"ComfyUI has no record of job {prompt_id}. Did it restart?"
+                    )
                 resp.raise_for_status()
                 history = resp.json()
-            except requests.RequestException:
-                history = {}
+            except (requests.RequestException, ValueError):
+                history = {}  # Transient: keep polling.
 
             entry = history.get(prompt_id) if isinstance(history, dict) else None
             if entry:
@@ -382,7 +423,10 @@ class ComfyUIProvider(Provider):
                 continue
             for key in ("audio", "audios", "images", "files"):
                 for item in node_output.get(key) or []:
-                    filename = (item or {}).get("filename", "")
+                    # Custom nodes are free to emit plain strings here.
+                    if not isinstance(item, dict):
+                        continue
+                    filename = item.get("filename", "")
                     if Path(filename).suffix.lower() in AUDIO_SUFFIXES:
                         return (
                             filename,

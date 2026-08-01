@@ -28,6 +28,9 @@ from soundcraft.providers.registry import register
 
 DEFAULT_BASE = "https://router.huggingface.co/hf-inference/models"
 
+#: Attempts against a cold model, which answers 503 while it loads.
+RETRIES = 4
+
 MODELS = (
     Option("facebook/musicgen-small", "MusicGen small"),
     Option("facebook/musicgen-medium", "MusicGen medium"),
@@ -118,9 +121,11 @@ class HuggingFaceProvider(Provider):
         if not token:
             raise ProviderUnavailable("HF_API_TOKEN is not set. Add it in Settings.")
 
-        base = settings.get("HF_INFERENCE_BASE", DEFAULT_BASE).rstrip("/")
+        base = settings.get("HF_INFERENCE_BASE").rstrip("/")
         model = str(request.get("model", "facebook/musicgen-small"))
-        url = base if base.endswith(model) else f"{base}/{model}"
+        # A dedicated Inference Endpoint already points at one model; only the
+        # shared router needs the model appended.
+        url = base if base.endswith(f"/{model}") else f"{base}/{model}"
 
         payload = {
             "inputs": request.prompt,
@@ -130,15 +135,19 @@ class HuggingFaceProvider(Provider):
         headers = {"Authorization": f"Bearer {token}"}
 
         # A cold model answers 503 with an estimated load time; retry a few times.
-        for attempt in range(4):
+        for attempt in range(RETRIES):
             try:
                 resp = requests.post(url, headers=headers, json=payload, timeout=300)
             except requests.RequestException as e:
                 raise ProviderError(f"Could not reach Hugging Face: {e}") from e
 
-            if resp.status_code == 503 and attempt < 3:
-                time.sleep(_estimated_wait(resp, attempt))
-                continue
+            if resp.status_code == 503:
+                if attempt < RETRIES - 1:
+                    time.sleep(_estimated_wait(resp, attempt))
+                    continue
+                raise ProviderError(
+                    f"{model} is still loading on Hugging Face. Wait a moment and retry."
+                )
             if resp.status_code == 401:
                 raise ProviderUnavailable(
                     "Hugging Face rejected the token. Check it in Settings."
@@ -163,9 +172,7 @@ class HuggingFaceProvider(Provider):
                 extra={"model": model},
             )
 
-        raise ProviderError(
-            f"{model} is still loading on Hugging Face. Wait a moment and retry."
-        )
+        raise AssertionError("unreachable: every branch above returns or raises")
 
 
 def _estimated_wait(resp: requests.Response, attempt: int) -> float:
@@ -181,6 +188,8 @@ def _detail(resp: requests.Response) -> str:
         payload = resp.json()
     except ValueError:
         return resp.text[:500]
+    if not isinstance(payload, dict):
+        return str(payload)[:500]
     return str(payload.get("error") or payload)[:500]
 
 

@@ -18,7 +18,7 @@
       --line-strong: #2b3846;
       --text: #e6edf5;
       --text-dim: #8b9bb0;
-      --text-faint: #5c6b7f;
+      --text-faint: #7d8da3;
       --accent: #2ee6c5;
       --accent-dim: #1a9e88;
       --violet: #7c5cff;
@@ -43,7 +43,7 @@
       --line-strong: #c3ccd8;
       --text: #10161f;
       --text-dim: #5b6879;
-      --text-faint: #8c98a8;
+      --text-faint: #5f6b7a;
       --accent: #0d9b84;
       --accent-dim: #0d9b84;
       --violet: #5b3fd6;
@@ -215,6 +215,7 @@
     }
 
     .backend-note {
+      display: block;
       margin: 3px 0 0 15px;
       font-size: 11.5px;
       color: var(--text-faint);
@@ -763,7 +764,7 @@
       <div class="spacer"></div>
       <div class="status">
         <span class="dot" id="apiDot"></span>
-        <span id="apiLabel">connecting…</span>
+        <span id="apiLabel" aria-live="polite">connecting…</span>
       </div>
       <button class="ghost" type="button" id="settingsBtn">Settings</button>
     </header>
@@ -796,7 +797,7 @@
               <button class="primary" type="button" id="generateBtn">Generate</button>
             </div>
 
-            <div class="notice hidden" id="composeNotice"></div>
+            <div class="notice hidden" id="composeNotice" role="status" aria-live="polite"></div>
           </section>
 
           <div class="feed-head">
@@ -848,7 +849,7 @@
       </div>
       <div class="sheet-body" id="settingsBody"></div>
       <div class="sheet-foot">
-        <span id="settingsStatus" style="font-size: 12px; color: var(--text-faint);"></span>
+        <span id="settingsStatus" role="status" aria-live="polite" style="font-size: 12px; color: var(--text-faint);"></span>
         <div class="spacer"></div>
         <button class="ghost" type="button" id="openOutputBtn">Open output folder</button>
         <button class="primary" type="button" id="saveSettingsBtn">Save</button>
@@ -895,7 +896,8 @@
     tab: "session",
     queue: [],            // playable items in display order
     current: null,        // { path, title }
-    version: "",
+    generating: false,
+    seeking: false,
   };
 
   // -- utilities ----------------------------------------------------
@@ -935,7 +937,37 @@
 
   // -- api ----------------------------------------------------------
 
-  async function api(path, options = {}) {
+  //  One shared prompt, so concurrent 401s do not each ask for a token.
+  let tokenPrompt = null;
+
+  function askForToken() {
+    if (!tokenPrompt) {
+      tokenPrompt = Promise.resolve().then(() => {
+        const entered = window.prompt("This server requires an API token:");
+        const token = (entered || "").trim();
+        if (token) localStorage.setItem(TOKEN_KEY, token);
+        return token;
+      }).finally(() => {
+        // Cleared on the next tick so everything waiting on this round shares it.
+        setTimeout(() => { tokenPrompt = null; }, 0);
+      });
+    }
+    return tokenPrompt;
+  }
+
+  function errorDetail(payload, status) {
+    const detail = payload && payload.detail;
+    if (typeof detail === "string") return detail;
+    // FastAPI validation errors arrive as a list of {loc, msg}.
+    if (Array.isArray(detail)) {
+      return detail
+        .map((d) => `${(d.loc || []).slice(1).join(".")}: ${d.msg}`)
+        .join(", ") || `Request failed (${status})`;
+    }
+    return `Request failed (${status})`;
+  }
+
+  async function api(path, options = {}, { retried = false } = {}) {
     const token = localStorage.getItem(TOKEN_KEY);
     const headers = { ...(options.headers || {}) };
     if (options.body) headers["Content-Type"] = "application/json";
@@ -944,12 +976,13 @@
     const res = await fetch(path, { ...options, headers });
 
     if (res.status === 401) {
-      const entered = window.prompt("This server requires an API token:");
-      if (entered) {
-        localStorage.setItem(TOKEN_KEY, entered.trim());
-        return api(path, options);
+      if (retried) {
+        localStorage.removeItem(TOKEN_KEY);
+        throw new Error("That API token was rejected.");
       }
-      throw new Error("An API token is required.");
+      const entered = await askForToken();
+      if (!entered) throw new Error("An API token is required.");
+      return api(path, options, { retried: true });
     }
 
     let payload = null;
@@ -959,12 +992,7 @@
       payload = null;
     }
 
-    if (!res.ok) {
-      const detail = payload && typeof payload.detail === "string"
-        ? payload.detail
-        : `Request failed (${res.status})`;
-      throw new Error(detail);
-    }
+    if (!res.ok) throw new Error(errorDetail(payload, res.status));
     return payload;
   }
 
@@ -986,7 +1014,7 @@
             <span class="dot ${ready ? "ok" : "warn"}"></span>
             ${escapeHtml(provider.label)}
           </span>
-          <p class="backend-note">${escapeHtml(ready ? provider.summary : provider.status.reason)}</p>
+          <span class="backend-note">${escapeHtml(ready ? provider.summary : provider.status.reason)}</span>
           <span class="tag-row">${tags}</span>
         </button>`;
     }).join("");
@@ -1006,27 +1034,34 @@
       let control;
 
       if (param.type === "select") {
+        const matched = param.options.some((o) => String(o.value) === String(value));
+        // An optional select needs a way to say "unspecified"; without it the
+        // browser silently picks the first option and the server-side default
+        // (e.g. the configured ComfyUI workflow) never applies.
+        const blank = param.optional
+          ? `<option value=""${matched ? "" : " selected"}>— default —</option>`
+          : "";
         const options = param.options.map((option) => {
           const selected = String(option.value) === String(value) ? " selected" : "";
           return `<option value="${escapeHtml(option.value)}"${selected}>${escapeHtml(option.label)}</option>`;
         }).join("");
-        control = `<select id="${id}" data-param="${escapeHtml(param.name)}">${options}</select>`;
+        control = `<select id="${escapeHtml(id)}" data-param="${escapeHtml(param.name)}">${blank}${options}</select>`;
       } else if (param.type === "bool") {
-        control = `<label class="checkline"><input type="checkbox" id="${id}" data-param="${escapeHtml(param.name)}" ${value ? "checked" : ""} /> enabled</label>`;
+        control = `<label class="checkline"><input type="checkbox" id="${escapeHtml(id)}" data-param="${escapeHtml(param.name)}" ${value ? "checked" : ""} /> enabled</label>`;
       } else if (param.type === "number") {
         const bounds = [
-          param.min !== null ? `min="${param.min}"` : "",
-          param.max !== null ? `max="${param.max}"` : "",
-          param.step !== null ? `step="${param.step}"` : "",
+          param.min !== null ? `min="${escapeHtml(param.min)}"` : "",
+          param.max !== null ? `max="${escapeHtml(param.max)}"` : "",
+          param.step !== null ? `step="${escapeHtml(param.step)}"` : "",
         ].join(" ");
-        control = `<input type="number" id="${id}" data-param="${escapeHtml(param.name)}" value="${escapeHtml(value)}" ${bounds} placeholder="${param.optional ? "random" : ""}" />`;
+        control = `<input type="number" id="${escapeHtml(id)}" data-param="${escapeHtml(param.name)}" value="${escapeHtml(value)}" ${bounds} placeholder="${param.optional ? "random" : ""}" />`;
       } else {
-        control = `<input type="text" id="${id}" data-param="${escapeHtml(param.name)}" value="${escapeHtml(value)}" />`;
+        control = `<input type="text" id="${escapeHtml(id)}" data-param="${escapeHtml(param.name)}" value="${escapeHtml(value)}" />`;
       }
 
       const unit = param.unit ? ` (${escapeHtml(param.unit)})` : "";
       const help = param.help ? `<p class="param-help">${escapeHtml(param.help)}</p>` : "";
-      return `<div><label class="field-label" for="${id}">${escapeHtml(param.label)}${unit}</label>${control}${help}</div>`;
+      return `<div><label class="field-label" for="${escapeHtml(id)}">${escapeHtml(param.label)}${unit}</label>${control}${help}</div>`;
     }).join("");
   }
 
@@ -1051,20 +1086,27 @@
     updateComposeNotice();
   }
 
+  function syncGenerateButton() {
+    const button = $("generateBtn");
+    button.disabled = state.generating || !currentProvider();
+    button.textContent = state.generating ? "Generating…" : "Generate";
+  }
+
   function updateComposeNotice() {
     const notice = $("composeNotice");
     const provider = currentProvider();
+    // Never derive the button from provider state alone: this runs while a
+    // generation is in flight (Refresh, saving settings) and would re-enable it.
+    syncGenerateButton();
     if (!provider || provider.status.ready) {
       notice.classList.add("hidden");
-      $("generateBtn").disabled = !provider;
       return;
     }
     notice.className = "notice warn";
     notice.innerHTML = `<strong>${escapeHtml(provider.label)} is not ready.</strong> ${escapeHtml(provider.status.reason)} ${escapeHtml(provider.status.fix)}`;
-    $("generateBtn").disabled = false;
   }
 
-  async function loadProviders() {
+  async function loadProviders({ onboard = false } = {}) {
     const data = await api("/providers");
     state.providers = data.providers;
 
@@ -1081,7 +1123,9 @@
       ? "See what the local LLM makes of this prompt"
       : "Set LM Studio URL and model in Settings to enable refinement";
 
-    if (!state.providers.some((p) => p.status.ready)) showOnboarding(true);
+    // Only on first boot: settings saves also refresh providers, and popping
+    // the overlay over the open settings sheet would trap the user.
+    if (onboard && !state.providers.some((p) => p.status.ready)) showOnboarding(true);
   }
 
   // -- feed ----------------------------------------------------------
@@ -1092,35 +1136,40 @@
     return haystack.toLowerCase().includes(query);
   }
 
+  function empty(message) {
+    return `<div class="empty">${escapeHtml(message)}</div>`;
+  }
+
   function renderFeed() {
     const feed = $("feed");
     state.queue = [];
+    // One exit point, so the playing highlight is never left stale.
+    let html;
 
     if (state.tab === "session") {
       const jobs = [...state.jobs.values()]
         .filter((job) => matchesSearch(`${job.request.prompt} ${job.request.backend || ""}`))
-        .sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
-
-      if (!jobs.length) {
-        feed.innerHTML = `<div class="empty">Generations from this session appear here.</div>`;
-        return;
-      }
-      feed.innerHTML = jobs.map(renderJob).join("");
+        .reverse();
+      html = jobs.length
+        ? jobs.map(renderJob).join("")
+        : empty("Generations from this session appear here.");
+    } else if (state.libraryError) {
+      html = empty(`Could not read the library: ${state.libraryError}`);
     } else {
       const tracks = state.tracks.filter((track) =>
         matchesSearch(`${track.title} ${track.prompt} ${track.input} ${track.name} ${track.backend}`));
+      state.queue = tracks.map((track) => ({ path: track.path, title: track.title }));
 
       if (!state.tracks.length) {
-        feed.innerHTML = `<div class="empty">Nothing generated yet. Your library lives on disk — generated files show up here.</div>`;
-        return;
+        html = empty("Nothing generated yet. Your library lives on disk — generated files show up here.");
+      } else if (!tracks.length) {
+        html = empty("No track matches that search.");
+      } else {
+        html = tracks.map(renderTrack).join("");
       }
-      if (!tracks.length) {
-        feed.innerHTML = `<div class="empty">No track matches that search.</div>`;
-        return;
-      }
-      state.queue = tracks.map((track) => ({ path: track.path, title: track.title }));
-      feed.innerHTML = tracks.map(renderTrack).join("");
     }
+
+    feed.innerHTML = html;
     syncPlayingHighlight();
   }
 
@@ -1156,7 +1205,7 @@
         ${files.map((path) => trackRow({
           path,
           title: path.split("/").pop(),
-          meta: escapeHtml(backend),
+          meta: backend,
         })).join("")}
       </article>`;
   }
@@ -1168,7 +1217,7 @@
     return trackRow({
       path: track.path,
       title: track.title || track.name,
-      meta: escapeHtml(bits.filter(Boolean).join(" · ")),
+      meta: bits.filter(Boolean).join(" · "),
       reusable: Boolean(track.input || track.prompt),
       deletable: true,
     });
@@ -1181,7 +1230,7 @@
         <button class="play-btn" type="button" data-action="play" data-path="${safePath}" aria-label="Play ${escapeHtml(title)}">▶</button>
         <div class="track-body">
           <div class="track-title">${escapeHtml(title)}</div>
-          <div class="track-meta">${meta}</div>
+          <div class="track-meta">${escapeHtml(meta)}</div>
         </div>
         <div class="track-actions">
           ${reusable ? `<button class="icon-btn" type="button" data-action="reuse" data-path="${safePath}">Reuse</button>` : ""}
@@ -1195,8 +1244,12 @@
     try {
       const data = await api("/library?limit=300");
       state.tracks = data.tracks || [];
-    } catch {
+      state.libraryError = null;
+    } catch (error) {
+      // Do not pass this off as an empty library — "nothing here yet" and
+      // "we could not ask" need different reactions from the user.
       state.tracks = [];
+      state.libraryError = error.message;
     }
     if (state.tab === "library") renderFeed();
   }
@@ -1216,19 +1269,20 @@
       return;
     }
 
-    const button = $("generateBtn");
-    button.disabled = true;
-    button.textContent = "Generating…";
+    if (state.generating) return;
+    state.generating = true;
+    syncGenerateButton();
     setTab("session");
 
     try {
+      const count = Math.min(10, Math.max(1, Number($("count").value) || 1));
       const job = await api("/jobs", {
         method: "POST",
         body: JSON.stringify({
           prompt,
           backend: state.backendId,
           params: collectParams(),
-          count: Number($("count").value) || 1,
+          count,
           raw: $("raw").checked,
         }),
       });
@@ -1238,8 +1292,8 @@
     } catch (error) {
       showNotice(error.message);
     } finally {
-      button.disabled = false;
-      button.textContent = "Generate";
+      state.generating = false;
+      syncGenerateButton();
     }
   }
 
@@ -1308,6 +1362,10 @@
   function step(offset) {
     if (!state.current || !state.queue.length) return;
     const index = state.queue.findIndex((item) => item.path === state.current.path);
+    // The queue is rebuilt on every render, so the playing track can drop out
+    // of it (search, tab switch). Stepping from a phantom position sends the
+    // user somewhere arbitrary; do nothing instead.
+    if (index === -1) return;
     const next = state.queue[(index + offset + state.queue.length) % state.queue.length];
     if (next) play(next.path, next.title);
   }
@@ -1329,9 +1387,15 @@
   });
   audio.addEventListener("timeupdate", () => {
     $("elapsed").textContent = formatTime(audio.currentTime);
-    if (audio.duration) {
+    // Not while the user is dragging: writing the value would yank the thumb
+    // back to the playhead several times a second.
+    if (audio.duration && !state.seeking) {
       $("seek").value = String((audio.currentTime / audio.duration) * 1000);
     }
+    $("seek").setAttribute(
+      "aria-valuetext",
+      `${formatTime(audio.currentTime)} of ${formatTime(audio.duration)}`,
+    );
   });
   audio.addEventListener("loadedmetadata", () => {
     $("total").textContent = formatTime(audio.duration);
@@ -1340,9 +1404,12 @@
     if (audio.src) showNotice("Could not load that audio file. It may have been moved or deleted.");
   });
 
+  $("seek").addEventListener("pointerdown", () => { state.seeking = true; });
   $("seek").addEventListener("input", (event) => {
     if (audio.duration) audio.currentTime = (event.target.value / 1000) * audio.duration;
   });
+  $("seek").addEventListener("change", () => { state.seeking = false; });
+  $("seek").addEventListener("pointerup", () => { state.seeking = false; });
   $("volume").addEventListener("input", (event) => {
     audio.volume = event.target.value / 100;
   });
@@ -1593,6 +1660,10 @@
         await api(`/library?path=${encodeURIComponent(path)}`, { method: "DELETE" });
         if (state.current && state.current.path === path) {
           audio.pause();
+          // Drop the source too, or the element keeps pointing at a file that
+          // no longer exists and fires a spurious error.
+          audio.removeAttribute("src");
+          audio.load();
           state.current = null;
           $("playerTitle").textContent = "Nothing loaded";
           $("player").classList.add("idle");
@@ -1639,9 +1710,15 @@
       showOnboarding(false);
       return;
     }
-    // Space toggles playback, unless the user is typing.
-    const typing = ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName);
-    if (event.code === "Space" && !typing && state.current) {
+    // Space toggles playback — but only when nothing interactive has focus.
+    // Space is how a keyboard user activates a <button>; stealing it here
+    // would make every control in the app unusable.
+    const el = document.activeElement;
+    const tag = el ? el.tagName : "";
+    const interactive =
+      ["INPUT", "TEXTAREA", "SELECT", "BUTTON", "A"].includes(tag) ||
+      (el && el.isContentEditable);
+    if (event.code === "Space" && !interactive && state.current) {
       event.preventDefault();
       if (audio.paused) audio.play(); else audio.pause();
     }
@@ -1650,11 +1727,13 @@
   // -- boot -------------------------------------------------------------------
 
   applyTheme();
-  loadProviders()
+  renderFeed();
+  // Sequential, not parallel: two concurrent 401s would prompt for the token
+  // twice before either could store it.
+  loadProviders({ onboard: true })
+    .then(loadLibrary)
     .then(checkHealth)
     .catch((error) => showNotice(error.message));
-  loadLibrary();
-  renderFeed();
   setInterval(checkHealth, 20000);
   </script>
 </body>

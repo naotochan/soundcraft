@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+
 from soundcraft.providers.base import Provider, ProviderError
 
 #: Presentation order for the bundled backends, most recommended first. Ids that
@@ -10,7 +12,12 @@ BUILTIN_ORDER = ("comfyui", "local", "replicate", "huggingface", "lyria")
 
 _providers: dict[str, Provider] = {}
 _order: list[str] = []
+#: Registration index per id, so display order never has to read `_order`
+#: itself — `list.sort` empties the list while the key function runs.
+_registered_at: dict[str, int] = {}
 _loaded = False
+# Reentrant: load_builtin() runs under this lock and calls register().
+_lock = threading.RLock()
 
 
 def _ensure_loaded() -> None:
@@ -21,19 +28,26 @@ def _ensure_loaded() -> None:
     provider base classes.
     """
     global _loaded
-    if _loaded:
-        return
-    _loaded = True
-    load_builtin()
+    with _lock:
+        if _loaded:
+            return
+        try:
+            load_builtin()
+        finally:
+            # Set last: a caller racing on a half-built registry would get
+            # "unknown backend" for providers that are merely still importing.
+            _loaded = True
 
 
 def register(provider: Provider) -> Provider:
     if not provider.id:
         raise ValueError("Provider must define an id")
-    if provider.id not in _providers:
-        _order.append(provider.id)
-        _order.sort(key=_display_rank)
-    _providers[provider.id] = provider
+    with _lock:
+        if provider.id not in _providers:
+            _registered_at[provider.id] = len(_registered_at)
+            _order.append(provider.id)
+            _order.sort(key=_display_rank)
+        _providers[provider.id] = provider
     return provider
 
 
@@ -41,7 +55,7 @@ def _display_rank(provider_id: str) -> tuple[int, int]:
     """Bundled backends keep a curated order; others keep registration order."""
     if provider_id in BUILTIN_ORDER:
         return (0, BUILTIN_ORDER.index(provider_id))
-    return (1, _order.index(provider_id))
+    return (1, _registered_at[provider_id])
 
 
 def get(provider_id: str) -> Provider:
@@ -61,12 +75,14 @@ def has(provider_id: str) -> bool:
 
 def ids() -> list[str]:
     _ensure_loaded()
-    return list(_order)
+    with _lock:
+        return list(_order)
 
 
 def all_providers() -> list[Provider]:
     _ensure_loaded()
-    return [_providers[i] for i in _order]
+    with _lock:
+        return [_providers[i] for i in _order]
 
 
 def describe_all() -> list[dict]:
@@ -80,6 +96,20 @@ def default_id() -> str:
         if provider.availability().ready:
             return provider.id
     return providers[0].id if providers else ""
+
+
+def snapshot() -> dict:
+    """Everything the API exposes, computing each availability once."""
+    described = []
+    default = ""
+    for provider in all_providers():
+        entry = provider.describe()
+        described.append(entry)
+        if not default and entry["status"]["ready"]:
+            default = provider.id
+    if not default and described:
+        default = described[0]["id"]
+    return {"providers": described, "default": default}
 
 
 def load_builtin() -> None:

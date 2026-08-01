@@ -12,6 +12,7 @@ weeks: after warm-up there is nothing left to fail over the network.
 from __future__ import annotations
 
 import io
+import threading
 import wave
 from typing import Any
 
@@ -27,6 +28,7 @@ from soundcraft.providers.base import (
     ProviderError,
     ProviderUnavailable,
     SettingSpec,
+    has_module,
 )
 from soundcraft.providers.registry import register
 
@@ -141,15 +143,19 @@ class LocalMusicGenProvider(Provider):
     )
 
     def __init__(self) -> None:
-        self._cache: dict[tuple[str, str], Any] = {}
+        # Exactly one model stays resident. MusicGen large is several GB, and
+        # an installation that switches models must not accumulate them.
+        self._loaded_key: tuple[str, str] | None = None
+        self._loaded: Any = None
+        # Loading is slow and allocates GPU memory; two workers must not do it
+        # for the same model at once.
+        self._load_lock = threading.Lock()
 
     # -- availability ----------------------------------------------------
 
     @staticmethod
     def dependencies_installed() -> bool:
-        from importlib.util import find_spec
-
-        return all(find_spec(mod) is not None for mod in ("torch", "transformers", "numpy"))
+        return all(has_module(mod) for mod in ("torch", "transformers", "numpy"))
 
     def availability(self) -> Availability:
         if not self.dependencies_installed():
@@ -161,31 +167,38 @@ class LocalMusicGenProvider(Provider):
         return READY
 
     def on_settings_changed(self) -> None:
-        self._cache.clear()
+        with self._load_lock:
+            self._loaded_key = None
+            self._loaded = None
 
     # -- generation ------------------------------------------------------
 
     def _load(self, model_id: str, device: str):
         key = (model_id, device)
-        cached = self._cache.get(key)
-        if cached is not None:
-            return cached
+        with self._load_lock:
+            if self._loaded_key == key:
+                return self._loaded
 
-        from transformers import AutoProcessor, MusicgenForConditionalGeneration
+            from transformers import AutoProcessor, MusicgenForConditionalGeneration
 
-        try:
-            processor = AutoProcessor.from_pretrained(model_id)
-            model = MusicgenForConditionalGeneration.from_pretrained(model_id)
-        except Exception as e:
-            raise ProviderError(
-                f"Could not load {model_id}: {e}. The first run downloads several "
-                "GB — check your connection and disk space."
-            ) from e
+            # Release the previous model before allocating the next one.
+            self._loaded_key = None
+            self._loaded = None
 
-        model = model.to(device)
-        model.eval()
-        self._cache[key] = (processor, model)
-        return processor, model
+            try:
+                processor = AutoProcessor.from_pretrained(model_id)
+                model = MusicgenForConditionalGeneration.from_pretrained(model_id)
+            except Exception as e:
+                raise ProviderError(
+                    f"Could not load {model_id}: {e}. The first run downloads several "
+                    "GB — check your connection and disk space."
+                ) from e
+
+            model = model.to(device)
+            model.eval()
+            self._loaded_key = key
+            self._loaded = (processor, model)
+            return self._loaded
 
     def generate(self, request: GenerationRequest) -> GeneratedAudio:
         if not self.dependencies_installed():
@@ -200,8 +213,11 @@ class LocalMusicGenProvider(Provider):
         processor, model = self._load(model_id, device)
 
         seed = request.params.get("seed")
+        # A local Generator rather than torch.manual_seed: the global seed is
+        # process-wide, so two concurrent jobs would overwrite each other's.
+        generator = None
         if seed is not None:
-            torch.manual_seed(int(seed))
+            generator = torch.Generator(device=device).manual_seed(int(seed))
 
         duration = int(request.get("duration", 15))
         inputs = processor(text=[request.prompt], padding=True, return_tensors="pt")
@@ -214,6 +230,7 @@ class LocalMusicGenProvider(Provider):
                     do_sample=True,
                     guidance_scale=float(request.get("guidance_scale", 3.0)),
                     max_new_tokens=duration * TOKENS_PER_SECOND,
+                    generator=generator,
                 )
         except RuntimeError as e:
             hint = ""

@@ -24,6 +24,7 @@ DIST = ROOT / "dist"
 BUILD = ROOT / "build"
 
 PLATFORM_TAG = {"Darwin": "macos", "Windows": "windows", "Linux": "linux"}
+ARCH_TAG = {"x86_64": "x64", "AMD64": "x64", "arm64": "arm64", "aarch64": "arm64"}
 
 MACOS_ICON_SIZES = (
     (16, "icon_16x16.png"),
@@ -153,7 +154,11 @@ def main() -> int:
 
     print(f"\nBuilt: {bundle}")
     if not args.no_zip:
-        archive = DIST / f"Soundcraft-{version}-{tag}.zip"
+        # The architecture is part of the name: CI builds macOS twice (Intel and
+        # Apple silicon) and merges the artifacts into one release directory, so
+        # a shared name would silently drop one of them.
+        arch = ARCH_TAG.get(platform.machine(), platform.machine())
+        archive = DIST / f"Soundcraft-{version}-{tag}-{arch}.zip"
         print("==> Archiving")
         zip_bundle(bundle, archive)
         print(f"Built: {archive}")

@@ -12,10 +12,23 @@ from soundcraft.providers.base import (
     ProviderError,
     ProviderUnavailable,
     SettingSpec,
+    has_module,
 )
 from soundcraft.providers.registry import register
 
 DEFAULT_MODEL = "lyria-3-clip-preview"
+
+#: The API has returned more than one container over time; name the file for
+#: what it actually is so players and the library agree.
+MIME_SUFFIX = {
+    "audio/mpeg": ".mp3",
+    "audio/mp3": ".mp3",
+    "audio/wav": ".wav",
+    "audio/x-wav": ".wav",
+    "audio/wave": ".wav",
+    "audio/ogg": ".ogg",
+    "audio/flac": ".flac",
+}
 
 
 class LyriaProvider(Provider):
@@ -60,9 +73,7 @@ class LyriaProvider(Provider):
 
     @staticmethod
     def dependencies_installed() -> bool:
-        from importlib.util import find_spec
-
-        return find_spec("google.genai") is not None
+        return has_module("google.genai")
 
     def availability(self) -> Availability:
         if not self.dependencies_installed():
@@ -119,10 +130,11 @@ class LyriaProvider(Provider):
 
         for part in candidates[0].content.parts:
             if part.inline_data and part.inline_data.data:
+                mime = (part.inline_data.mime_type or "").split(";")[0].strip()
                 return GeneratedAudio(
                     data=part.inline_data.data,
-                    suffix=".mp3",
-                    extra={"model": model},
+                    suffix=MIME_SUFFIX.get(mime, ".mp3"),
+                    extra={"model": model, "mime_type": mime},
                 )
 
         raise ProviderError("Lyria returned a response with no audio payload.")

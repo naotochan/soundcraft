@@ -18,46 +18,69 @@ from soundcraft.config import (
     DEFAULT_SERVER_PORT,
     enable_app_mode,
 )
+from soundcraft.server import assert_bind_is_safe
 
 WINDOW_BACKGROUND = "#07090d"  # Matches the GUI's dark ground, so no white flash.
 
 
-def _free_port(host: str, preferred: int) -> int:
-    """Return the preferred port, or an OS-assigned one if it is taken.
+#: Wildcard binds are not addresses you can connect to; the window uses loopback.
+WILDCARD_HOSTS = {"0.0.0.0": "127.0.0.1", "::": "::1", "": "127.0.0.1"}
 
-    Two copies of the app on one machine should both open rather than the
-    second dying on "address already in use".
+
+def _connect_host(host: str) -> str:
+    """A host the window and the readiness probe can actually connect to."""
+    return WILDCARD_HOSTS.get(host, host)
+
+
+def _url_host(host: str) -> str:
+    connect = _connect_host(host)
+    return f"[{connect}]" if ":" in connect else connect
+
+
+def _bind_listener(host: str, preferred: int) -> socket.socket:
+    """Bind a listening socket, falling back to any free port.
+
+    The socket is handed straight to uvicorn rather than probed and closed:
+    probing leaves a window for another process to take the port, and on
+    Windows a probe can succeed against a port that is already in use.
     """
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    family = socket.AF_INET6 if ":" in host else socket.AF_INET
+
+    for port in (preferred, 0):
+        listener = socket.socket(family, socket.SOCK_STREAM)
         try:
-            probe.bind((host, preferred))
-            return preferred
+            listener.bind((host, port))
         except OSError:
-            pass
+            listener.close()
+            continue
+        listener.listen(128)
+        listener.set_inheritable(True)
+        return listener
 
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-        probe.bind((host, 0))
-        return probe.getsockname()[1]
+    raise SystemExit(f"Could not bind any port on {host}.")
 
 
-def _wait_for_port(host: str, port: int, timeout: float = 30.0) -> None:
-    deadline = time.time() + timeout
+def _wait_until_serving(host: str, port: int, thread: threading.Thread) -> None:
+    """Block until the server answers, or fail fast if its thread died."""
+    deadline = time.time() + 30.0
     while time.time() < deadline:
+        if not thread.is_alive():
+            raise SystemExit("The local server stopped before it finished starting.")
         try:
             with socket.create_connection((host, port), timeout=0.5):
                 return
         except OSError:
             time.sleep(0.1)
-    raise TimeoutError(f"The local server did not start on {host}:{port}")
+    raise SystemExit(f"The local server did not start on {host}:{port}.")
 
 
-def _start_server(host: str, port: int) -> None:
+def _start_server(listener: socket.socket) -> None:
     import uvicorn
 
     from soundcraft.server import app
 
-    uvicorn.run(app, host=host, port=port, log_level="warning")
+    config = uvicorn.Config(app, log_level="warning")
+    uvicorn.Server(config).run(sockets=[listener])
 
 
 def run_desktop_app(
@@ -77,23 +100,28 @@ def run_desktop_app(
         ) from e
 
     enable_app_mode()
-    port = _free_port(host, port)
+    # The desktop window is another way to start the same server, so it has to
+    # honour the same rule about not exposing it unauthenticated.
+    assert_bind_is_safe(host)
+
+    listener = _bind_listener(host, port)
+    port = listener.getsockname()[1]
 
     thread = threading.Thread(
         target=_start_server,
-        args=(host, port),
+        args=(listener,),
         daemon=True,
         name="soundcraft-uvicorn",
     )
     thread.start()
-    _wait_for_port(host, port)
+    _wait_until_serving(_connect_host(host), port, thread)
 
     if on_started:
         on_started()
 
     webview.create_window(
         f"soundcraft {APP_VERSION}",
-        f"http://{host}:{port}/",
+        f"http://{_url_host(host)}:{port}/",
         width=1180,
         height=860,
         min_size=(880, 620),

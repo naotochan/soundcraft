@@ -8,6 +8,7 @@ hardcoded list of backends.
 from __future__ import annotations
 
 import logging
+import re
 import secrets
 import subprocess
 import sys
@@ -48,49 +49,100 @@ log = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
-app = FastAPI(
-    title="soundcraft",
-    description="Local API and GUI for generating music with pluggable backends",
-    version=APP_VERSION,
-)
-
 queue = JobQueue()
 
 
 # -- auth ---------------------------------------------------------------------
 
 
-def require_auth(request: Request) -> None:
-    """Enforce the API token when one is configured.
+def api_token() -> str:
+    """The configured API token, if any. One definition, used everywhere."""
+    return settings.get("SOUNDCRAFT_API_TOKEN").strip()
 
-    Without a token the server is only safe on loopback; `run_server` refuses to
-    bind a public interface unless a token is set.
-    """
-    expected = settings.get("SOUNDCRAFT_API_TOKEN")
-    if not expected:
-        return
 
+def _token_matches(presented: str) -> bool:
+    # compare_digest raises TypeError on non-ASCII str, and the presented value
+    # is attacker-controlled — compare bytes so a stray character is a 401, not
+    # a 500.
+    return secrets.compare_digest(presented.encode("utf-8"), api_token().encode("utf-8"))
+
+
+def _bearer(request: Request) -> str:
     header = request.headers.get("authorization", "")
-    presented = header[7:] if header.lower().startswith("bearer ") else ""
-    if not presented:
-        presented = request.query_params.get("token", "")
-    if not secrets.compare_digest(presented, expected):
+    return header[7:] if header[:7].lower() == "bearer " else ""
+
+
+def require_auth(request: Request) -> None:
+    """Enforce the API token when one is configured."""
+    if not api_token():
+        return
+    if not _token_matches(_bearer(request)):
+        raise HTTPException(401, "Invalid or missing API token")
+
+
+def require_media_auth(request: Request) -> None:
+    """Same, but also accepts `?token=`.
+
+    `<audio src>` and download links cannot set headers. Restricted to media so
+    that destructive routes never put the token somewhere it can be logged.
+    """
+    if not api_token():
+        return
+    presented = _bearer(request) or request.query_params.get("token", "")
+    if not _token_matches(presented):
         raise HTTPException(401, "Invalid or missing API token")
 
 
 Auth = Depends(require_auth)
+MediaAuth = Depends(require_media_auth)
 
 
-def _configure_cors() -> None:
-    origins = [o.strip() for o in settings.get("SOUNDCRAFT_CORS_ORIGINS", "").split(",")]
-    origins = [o for o in origins if o]
+def cors_origins() -> list[str]:
+    raw = settings.get("SOUNDCRAFT_CORS_ORIGINS", "")
+    return [origin.strip() for origin in raw.split(",") if origin.strip()]
+
+
+def create_app() -> FastAPI:
+    """Build the application, middleware included.
+
+    Middleware has to be attached before the app starts, and both entry points
+    (`soundcraft serve` and the desktop window) must get the same one — so it is
+    wired here rather than inside a run function.
+    """
+    application = FastAPI(
+        title="soundcraft",
+        description="Local API and GUI for generating music with pluggable backends",
+        version=APP_VERSION,
+    )
+
+    origins = cors_origins()
+    if "*" in origins:
+        raise SystemExit(
+            "SOUNDCRAFT_CORS_ORIGINS does not accept '*': combined with credentials "
+            "it would let any web page drive this server. List explicit origins."
+        )
     if origins:
-        app.add_middleware(
+        application.add_middleware(
             CORSMiddleware,
             allow_origins=origins,
             allow_credentials=True,
             allow_methods=["*"],
             allow_headers=["*"],
+        )
+    return application
+
+
+app = create_app()
+
+
+def assert_bind_is_safe(host: str) -> None:
+    """Refuse to expose an unauthenticated server beyond this machine."""
+    if host not in LOOPBACK_HOSTS and not api_token():
+        raise SystemExit(
+            f"Refusing to bind {host} without authentication.\n"
+            "Set an API token first:\n"
+            "  soundcraft config set SOUNDCRAFT_API_TOKEN <a-long-random-string>\n"
+            "…or bind 127.0.0.1 to keep the server local."
         )
 
 
@@ -107,7 +159,9 @@ class GenerateRequest(BaseModel):
     )
     count: int = Field(1, ge=1, le=10, description="Number of variations")
     raw: bool = Field(False, description="Skip LLM prompt refinement")
-    output_dir: str | None = Field(None, description="Override the output directory")
+    output_dir: str | None = Field(
+        None, description="Output directory; must be inside a library directory"
+    )
 
 
 class GenerateResponse(BaseModel):
@@ -124,42 +178,68 @@ class RefineRequest(BaseModel):
 
 # -- generation ---------------------------------------------------------------
 
+#: Domain failures, and how each maps onto HTTP. Ordered: first match wins.
+ERROR_CODES: tuple[tuple[type[Exception], int, str], ...] = (
+    (ProviderUnavailable, 400, "backend_not_configured"),
+    (ValueError, 400, "invalid_request"),
+    (ProviderError, 502, "backend_failed"),
+    (OSError, 500, "io_error"),
+)
 
-def _run(req: GenerateRequest, on_progress=None) -> GenerateResponse:
+
+def classify(error: Exception) -> tuple[int, str]:
+    for kind, status, code in ERROR_CODES:
+        if isinstance(error, kind):
+            return status, code
+    return 500, "internal_error"
+
+
+def as_http(error: Exception) -> HTTPException:
+    status, _ = classify(error)
+    return HTTPException(status, str(error) or type(error).__name__)
+
+
+def _generate(req: GenerateRequest, on_progress=None) -> GenerateResponse:
+    """Run a generation. Raises domain exceptions, never HTTPException.
+
+    Called from request handlers and from job workers alike, so it must not
+    bake in a transport.
+    """
     backend = req.backend or registry.default_id()
     if not backend:
-        raise HTTPException(503, "No generation backends are registered.")
+        raise ProviderUnavailable("No generation backends are registered.")
+    if not registry.has(backend):
+        # A bad id is the caller's mistake, not an upstream failure — check it
+        # here so it maps to 400 rather than 502.
+        raise ValueError(
+            f"Unknown backend {backend!r}. Available: {', '.join(registry.ids())}"
+        )
 
-    try:
-        provider = registry.get(backend)
-    except ProviderError as e:
-        raise HTTPException(400, str(e)) from e
-
+    provider = registry.get(backend)
     status = provider.availability()
     if not status.ready:
-        raise HTTPException(400, f"{status.reason} {status.fix}".strip())
+        raise ProviderUnavailable(f"{status.reason} {status.fix}".strip())
 
-    output_dir = Path(req.output_dir).expanduser() if req.output_dir else default_output_dir()
+    if req.output_dir:
+        output_dir = Path(req.output_dir).expanduser().resolve()
+        if not is_in_library(output_dir):
+            raise ValueError(
+                "output_dir must be inside a library directory "
+                f"({', '.join(str(r) for r in library_roots())}). "
+                "Use the CLI's -o flag to write elsewhere."
+            )
+    else:
+        output_dir = default_output_dir()
 
-    try:
-        result = run_generate(
-            req.prompt,
-            backend=backend,
-            params=req.params,
-            count=req.count,
-            output_dir=output_dir,
-            raw=req.raw,
-            progress=on_progress,
-        )
-    except ValueError as e:
-        raise HTTPException(400, str(e)) from e
-    except ProviderUnavailable as e:
-        raise HTTPException(400, str(e)) from e
-    except ProviderError as e:
-        raise HTTPException(502, str(e)) from e
-    except OSError as e:
-        raise HTTPException(500, f"Could not write the output file: {e}") from e
-
+    result = run_generate(
+        req.prompt,
+        backend=backend,
+        params=req.params,
+        count=req.count,
+        output_dir=output_dir,
+        raw=req.raw,
+        progress=on_progress,
+    )
     return GenerateResponse(
         input=result.input,
         prompt=result.prompt,
@@ -179,18 +259,14 @@ def health() -> dict[str, Any]:
         "status": "ok",
         "service": "soundcraft",
         "version": APP_VERSION,
-        "auth_required": settings.is_set("SOUNDCRAFT_API_TOKEN"),
+        "auth_required": bool(api_token()),
     }
 
 
 @app.get("/providers", dependencies=[Auth])
 def get_providers() -> dict[str, Any]:
     """Every backend with its parameters and readiness — drives the whole UI."""
-    return {
-        "providers": registry.describe_all(),
-        "default": registry.default_id(),
-        "refiner_available": refiner_available(),
-    }
+    return {**registry.snapshot(), "refiner_available": refiner_available()}
 
 
 @app.get("/settings", dependencies=[Auth])
@@ -237,7 +313,10 @@ def refine(body: RefineRequest) -> dict[str, Any]:
 @app.post("/generate", response_model=GenerateResponse, dependencies=[Auth])
 def generate(req: GenerateRequest) -> GenerateResponse:
     """Synchronous generation. Blocks until every file is written."""
-    return _run(req)
+    try:
+        return _generate(req)
+    except Exception as e:
+        raise as_http(e) from e
 
 
 @app.post("/jobs", status_code=202, dependencies=[Auth])
@@ -247,16 +326,16 @@ def create_job(req: GenerateRequest) -> dict[str, Any]:
         def on_progress(done: int, total: int, _path: Path) -> None:
             queue.set_progress(job.id, done, total)
 
-        return _run(req, on_progress).model_dump()
+        return _generate(req, on_progress).model_dump()
 
-    job = queue.submit(req.model_dump(), work)
+    job = queue.submit(req.model_dump(), work, classify=classify)
     return job.as_dict()
 
 
 @app.get("/jobs", dependencies=[Auth])
 def list_jobs(limit: int = Query(50, ge=1, le=200)) -> dict[str, Any]:
-    jobs = queue.list(limit)
-    return {"jobs": [j.as_dict() for j in jobs], "count": len(jobs)}
+    jobs = queue.recent(limit)
+    return {"jobs": jobs, "count": len(jobs)}
 
 
 @app.get("/jobs/{job_id}", dependencies=[Auth])
@@ -264,7 +343,7 @@ def get_job(job_id: str) -> dict[str, Any]:
     job = queue.get(job_id)
     if job is None:
         raise HTTPException(404, f"Job not found: {job_id}")
-    return job.as_dict()
+    return job
 
 
 @app.get("/library", dependencies=[Auth])
@@ -292,7 +371,7 @@ def remove_track(path: str = Query(..., min_length=1)) -> dict[str, str]:
     return {"deleted": path}
 
 
-@app.get("/media", dependencies=[Auth])
+@app.get("/media", dependencies=[MediaAuth])
 def media(
     path: str = Query(..., min_length=1),
     download: bool = Query(False, description="Send as an attachment instead of inline"),
@@ -339,6 +418,33 @@ if STATIC_DIR.is_dir():
 # -- entry point --------------------------------------------------------------
 
 
+TOKEN_IN_URL = re.compile(r"([?&]token=)[^&\s]+")
+
+
+def redact_token(text: str) -> str:
+    return TOKEN_IN_URL.sub(r"\1<redacted>", text)
+
+
+def install_access_log_redaction() -> None:
+    """Keep `?token=` out of uvicorn's access log.
+
+    `/media` accepts the token as a query parameter because `<audio src>` cannot
+    send a header, and uvicorn logs the full request line.
+    """
+    from uvicorn.logging import AccessFormatter
+
+    if getattr(AccessFormatter, "_soundcraft_redacts", False):
+        return
+
+    original = AccessFormatter.formatMessage
+
+    def formatMessage(self, record):  # noqa: N802 - logging's own naming
+        return redact_token(original(self, record))
+
+    AccessFormatter.formatMessage = formatMessage
+    AccessFormatter._soundcraft_redacts = True
+
+
 def run_server(
     host: str = DEFAULT_SERVER_HOST,
     port: int = DEFAULT_SERVER_PORT,
@@ -347,21 +453,14 @@ def run_server(
 ) -> None:
     import uvicorn
 
-    if host not in LOOPBACK_HOSTS and not settings.is_set("SOUNDCRAFT_API_TOKEN"):
-        raise SystemExit(
-            f"Refusing to bind {host} without authentication.\n"
-            "Set an API token first:\n"
-            "  soundcraft config set SOUNDCRAFT_API_TOKEN <a-long-random-string>\n"
-            "…or bind 127.0.0.1 to keep the server local."
-        )
-
-    _configure_cors()
+    assert_bind_is_safe(host)
+    install_access_log_redaction()
 
     url = f"http://{host}:{port}"
     print(f"soundcraft {APP_VERSION} listening on {url}")
     print(f"  GUI            {url}/")
     print(f"  Backends       {', '.join(registry.ids())}")
-    if settings.is_set("SOUNDCRAFT_API_TOKEN"):
+    if api_token():
         print("  Auth           Bearer token required")
 
     if open_browser:

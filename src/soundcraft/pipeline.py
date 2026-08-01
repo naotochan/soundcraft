@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from soundcraft.library import write_track_meta
-from soundcraft.naming import unique_path
+from soundcraft.naming import reserve_path
 from soundcraft.paths import default_output_dir
 from soundcraft.prompt import refine_prompt
 from soundcraft.providers import registry
@@ -60,7 +60,7 @@ def run_generate(
     files: list[Path] = []
     for index in range(count):
         audio = provider.generate(request)
-        path = unique_path(out, prompt, audio.suffix)
+        path = reserve_path(out, prompt, audio.suffix)
         path.write_bytes(audio.data)
         resolved = path.resolve()
 

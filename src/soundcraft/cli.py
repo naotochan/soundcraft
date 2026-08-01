@@ -10,7 +10,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 from soundcraft.config import (
     APP_VERSION,
@@ -20,7 +20,22 @@ from soundcraft.config import (
     default_output_dir,
 )
 
-SHORTHANDS = {"duration": "duration", "model": "model"}
+#: CLI flags that map straight onto a parameter of the same name, when the
+#: chosen provider declares one.
+SHORTHAND_PARAMS = ("duration", "model")
+
+#: Matches the HTTP API's limit, so the same request fails the same way.
+MAX_COUNT = 10
+
+
+def _count(raw: str) -> int:
+    try:
+        value = int(raw)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"expected a number, got {raw!r}") from None
+    if not 1 <= value <= MAX_COUNT:
+        raise argparse.ArgumentTypeError(f"count must be between 1 and {MAX_COUNT}")
+    return value
 
 
 def _parse_params(pairs: list[str] | None) -> dict[str, Any]:
@@ -33,7 +48,7 @@ def _parse_params(pairs: list[str] | None) -> dict[str, Any]:
     return params
 
 
-def _fail(message: str) -> None:
+def _fail(message: str) -> NoReturn:
     print(f"Error: {message}", file=sys.stderr)
     raise SystemExit(1)
 
@@ -61,8 +76,8 @@ def cmd_generate(args: argparse.Namespace) -> None:
         _fail(f"{provider.label} is not ready. {status.reason} {status.fix}".strip())
 
     params = _parse_params(args.param)
-    for flag, name in SHORTHANDS.items():
-        value = getattr(args, flag, None)
+    for name in SHORTHAND_PARAMS:
+        value = getattr(args, name, None)
         if value is not None and provider.param(name) is not None:
             params.setdefault(name, value)
 
@@ -254,7 +269,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     gen.add_argument("-d", "--duration", type=int, help="Shorthand for --param duration=…")
     gen.add_argument("-m", "--model", help="Shorthand for --param model=…")
-    gen.add_argument("-n", "--count", type=int, default=DEFAULT_COUNT, help="Variations")
+    gen.add_argument(
+        "-n", "--count", type=_count, default=DEFAULT_COUNT,
+        help=f"Variations (1-{MAX_COUNT})",
+    )
     gen.add_argument("-o", "--output", type=Path, help="Output directory")
     gen.add_argument("--raw", action="store_true", help="Skip LLM prompt refinement")
     gen.set_defaults(func=cmd_generate)

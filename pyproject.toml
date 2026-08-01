@@ -21,6 +21,7 @@ dependencies = [
     "requests>=2.31",
     "python-dotenv>=1.0",
     "fastapi>=0.110",
+    "pydantic>=2.0",       # imported directly, not just via fastapi
     "uvicorn[standard]>=0.27",
 ]
 
@@ -31,7 +32,10 @@ app = ["pywebview>=5.0"]
 lyria = ["google-genai>=1.0"]
 # On-device generation. Large download; install only if you want offline runs.
 local = ["torch>=2.1", "transformers>=4.40", "numpy>=1.24"]
-build = ["pyinstaller>=6.0"]
+build = [
+    "pyinstaller>=6.0",
+    "pillow>=10.0; sys_platform == 'win32'",  # icon.png -> .ico
+]
 dev = ["pytest>=8.0", "httpx>=0.27", "ruff>=0.6"]
 # Everything except the multi-gigabyte local stack.
 all = ["soundcraft[app,lyria]"]

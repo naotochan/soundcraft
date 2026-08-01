@@ -188,14 +188,25 @@ def list_tracks(*, limit: int = 200, backend: str | None = None) -> list[dict[st
 
 
 def is_in_library(path: Path) -> bool:
-    """True when ``path`` sits inside one of the library roots."""
-    for root in library_roots():
-        try:
-            path.relative_to(root)
-            return True
-        except ValueError:
-            continue
-    return False
+    """True when ``path`` sits inside one of the library roots.
+
+    Resolves the path itself rather than trusting the caller: ``relative_to``
+    is purely lexical, so ``output/../../.ssh/id_rsa`` would otherwise pass.
+    """
+    try:
+        target = path.expanduser().resolve()
+    except OSError:
+        return False
+    return any(target == root or root in target.parents for root in library_roots())
+
+
+def _is_our_sidecar(path: Path) -> bool:
+    """Only delete a JSON file we recognise as one of ours."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return isinstance(data, dict) and "version" in data and "prompt" in data
 
 
 def delete_track(path: Path) -> None:
@@ -205,5 +216,10 @@ def delete_track(path: Path) -> None:
         raise ValueError(f"Refusing to delete outside the library: {target}")
     if target.suffix.lower() not in AUDIO_SUFFIXES:
         raise ValueError(f"Not an audio file: {target}")
+    if target.is_dir():
+        raise ValueError(f"Not a file: {target}")
+
     target.unlink(missing_ok=True)
-    meta_path_for(target).unlink(missing_ok=True)
+    sidecar = meta_path_for(target)
+    if sidecar.is_file() and _is_our_sidecar(sidecar):
+        sidecar.unlink(missing_ok=True)

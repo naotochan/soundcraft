@@ -58,11 +58,13 @@ def refine_prompt(raw_input: str) -> str:
             timeout=30,
         )
         resp.raise_for_status()
-        refined = resp.json()["choices"][0]["message"]["content"].strip()
+        # `content` is null on some models (reasoning-only or tool-call turns).
+        content = resp.json()["choices"][0]["message"].get("content")
+        refined = (content or "").strip()
     except requests.RequestException as e:
         log.warning("Prompt refinement unavailable (%s); using the raw prompt.", e)
         return raw_input
-    except (KeyError, IndexError, ValueError) as e:
+    except (KeyError, IndexError, TypeError, AttributeError, ValueError) as e:
         log.warning("Unexpected LLM response (%s); using the raw prompt.", e)
         return raw_input
 

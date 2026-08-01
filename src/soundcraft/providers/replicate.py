@@ -182,31 +182,38 @@ class ReplicateProvider(Provider):
         return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
     def input_fields(self, ref: str) -> dict[str, Any]:
-        """Input properties declared by the model, so we map fields correctly."""
-        owner_name = ref.split(":")[0]
-        if owner_name in self._schema_cache:
-            return self._schema_cache[owner_name]
+        """Input properties declared by the model, so we map fields correctly.
 
-        fields: dict[str, Any] = {}
+        Only successful lookups are cached: caching a network blip would pin
+        that model to guessed field names for the life of the process.
+        """
+        if ref in self._schema_cache:
+            return self._schema_cache[ref]
+
+        owner_name, _, version = ref.partition(":")
+        url = (
+            f"{API_ROOT}/models/{owner_name}/versions/{version}"
+            if version
+            else f"{API_ROOT}/models/{owner_name}"
+        )
+
         try:
-            resp = requests.get(
-                f"{API_ROOT}/models/{owner_name}",
-                headers=self._headers(),
-                timeout=20,
+            resp = requests.get(url, headers=self._headers(), timeout=20)
+            if not resp.ok:
+                return {}
+            body = resp.json()
+            # The versions endpoint returns the version object directly.
+            version_obj = body if version else body.get("latest_version") or {}
+            schemas = (
+                version_obj.get("openapi_schema", {})
+                .get("components", {})
+                .get("schemas", {})
             )
-            if resp.ok:
-                schemas = (
-                    resp.json()
-                    .get("latest_version", {})
-                    .get("openapi_schema", {})
-                    .get("components", {})
-                    .get("schemas", {})
-                )
-                fields = (schemas.get("Input") or {}).get("properties") or {}
+            fields = (schemas.get("Input") or {}).get("properties") or {}
         except (requests.RequestException, ValueError, AttributeError):
-            fields = {}  # Fall back to conventional names.
+            return {}  # Fall back to conventional names, and retry next time.
 
-        self._schema_cache[owner_name] = fields
+        self._schema_cache[ref] = fields
         return fields
 
     def build_input(self, ref: str, request: GenerationRequest) -> dict[str, Any]:
@@ -231,7 +238,10 @@ class ReplicateProvider(Provider):
             payload[duration_key] = int(duration)
 
         seed = request.params.get("seed")
-        seed_key = pick(SEED_KEYS, None)
+        # Falls back to "seed" like the other fields: a model that rejects it
+        # says so, which beats silently discarding the one input whose whole
+        # purpose is reproducibility.
+        seed_key = pick(SEED_KEYS, "seed")
         if seed_key and seed is not None:
             payload[seed_key] = int(seed)
 
@@ -269,7 +279,14 @@ class ReplicateProvider(Provider):
         if resp.status_code >= 400:
             raise ProviderError(f"Replicate rejected the request: {_detail(resp)}")
 
-        prediction = resp.json()
+        try:
+            prediction = resp.json()
+        except ValueError as e:
+            # requests' JSONDecodeError subclasses OSError; without this it
+            # would surface as a disk error.
+            raise ProviderError("Replicate returned a non-JSON response.") from e
+        if not isinstance(prediction, dict):
+            raise ProviderError(f"Unexpected response from Replicate: {prediction!r:.200}")
         poll_url = (prediction.get("urls") or {}).get("get")
         if not poll_url:
             raise ProviderError("Replicate did not return a polling URL.")
@@ -284,15 +301,26 @@ class ReplicateProvider(Provider):
         )
 
     def _poll(self, url: str, headers: dict[str, str], timeout: float = 900) -> str:
+        """Wait for a prediction, tolerating brief network trouble.
+
+        The prediction is already running and already being billed, so a
+        dropped connection is worth retrying rather than abandoning.
+        """
         deadline = time.time() + timeout
         delay = 1.0
+        failures = 0
         while time.time() < deadline:
             try:
                 resp = requests.get(url, headers=headers, timeout=30)
                 resp.raise_for_status()
                 data = resp.json()
-            except requests.RequestException as e:
-                raise ProviderError(f"Lost contact with Replicate: {e}") from e
+                failures = 0
+            except (requests.RequestException, ValueError) as e:
+                failures += 1
+                if failures >= 4:
+                    raise ProviderError(f"Lost contact with Replicate: {e}") from e
+                time.sleep(delay)
+                continue
 
             status = data.get("status")
             if status == "succeeded":
@@ -338,6 +366,8 @@ def _detail(resp: requests.Response) -> str:
         payload = resp.json()
     except ValueError:
         return resp.text[:500]
+    if not isinstance(payload, dict):
+        return str(payload)[:500]
     return str(payload.get("detail") or payload)[:500]
 
 

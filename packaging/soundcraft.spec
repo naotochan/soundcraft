@@ -5,7 +5,7 @@ import os
 import sys
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_all, collect_data_files
+from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_submodules
 
 root = Path(SPECPATH).resolve().parent
 sys.path.insert(0, str(root / "src"))
@@ -28,22 +28,25 @@ hiddenimports = [
     "uvicorn.lifespan",
     "uvicorn.lifespan.on",
     "webview",
-    # Providers register themselves on import; the registry imports them by name.
-    "soundcraft.providers.comfyui",
-    "soundcraft.providers.gemini",
-    "soundcraft.providers.huggingface",
-    "soundcraft.providers.local",
-    "soundcraft.providers.replicate",
 ]
+
+# Providers register themselves on import and the registry imports them by
+# name, so PyInstaller cannot see them. Collected rather than listed, so a new
+# provider file cannot be forgotten here and break only the frozen build.
+hiddenimports += collect_submodules("soundcraft.providers")
 
 for package in ("webview", "fastapi", "starlette", "google.genai", "pydantic"):
     try:
         package_datas, package_binaries, package_hidden = collect_all(package)
-        datas += package_datas
-        binaries += package_binaries
-        hiddenimports += package_hidden
-    except Exception:
-        pass  # Optional dependency absent from this build environment.
+    except (ImportError, ModuleNotFoundError):
+        continue  # Optional dependency absent from this build environment.
+    except Exception as e:
+        # Anything else is a real problem: fail loudly rather than ship a
+        # bundle that is quietly missing a dependency.
+        raise SystemExit(f"Collecting {package} failed: {e}") from e
+    datas += package_datas
+    binaries += package_binaries
+    hiddenimports += package_hidden
 
 # scripts/build_app.py converts icon.png to the right format and points here.
 icon_env = os.environ.get("SOUNDCRAFT_ICON")
@@ -74,7 +77,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=is_macos,
@@ -90,7 +93,7 @@ coll = COLLECT(
     a.zipfiles,
     a.datas,
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     name="Soundcraft",
 )

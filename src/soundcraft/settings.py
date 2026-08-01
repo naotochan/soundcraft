@@ -8,7 +8,9 @@ UI along with it.
 
 from __future__ import annotations
 
+import logging
 import os
+import threading
 from collections.abc import Iterable
 from contextlib import suppress
 from pathlib import Path
@@ -24,6 +26,11 @@ from soundcraft.paths import (
     workflows_dir,
 )
 from soundcraft.providers.base import SettingSpec
+
+log = logging.getLogger(__name__)
+
+# Serialises read-modify-write of the settings file across request threads.
+_save_lock = threading.Lock()
 
 CORE_SETTINGS: tuple[SettingSpec, ...] = (
     SettingSpec(
@@ -93,18 +100,32 @@ def _candidate_env_paths() -> list[Path]:
 
 
 def load(*, override: bool = False) -> None:
-    for path in _candidate_env_paths():
+    """Load `.env` files so the *first* candidate path wins.
+
+    `load_dotenv(override=True)` lets the last file read win, which is the
+    opposite of the precedence `_candidate_env_paths` describes — so with
+    override we read the list backwards.
+    """
+    paths = _candidate_env_paths()
+    for path in (reversed(paths) if override else paths):
         if path.is_file():
-            load_dotenv(path, override=override)
+            # No interpolation: a token containing `$` is a token, not a
+            # reference to another variable.
+            load_dotenv(path, override=override, interpolate=False)
 
 
 # -- access -------------------------------------------------------------------
 
 
 def get(key: str, default: str | None = None) -> str:
-    """Read a setting: environment wins, then the spec default."""
+    """Read a setting.
+
+    An explicitly-set empty value means "off" and is returned as such; only an
+    absent variable falls back to the spec default. That is what makes it
+    possible to clear a setting that has a non-empty default.
+    """
     value = os.getenv(key)
-    if value is not None and value != "":
+    if value is not None:
         return value
     if default is not None:
         return default
@@ -153,41 +174,73 @@ def read_public() -> dict[str, Any]:
     }
 
 
+def _quote(value: str) -> str:
+    """Serialise a value so `.env` round-trips it exactly."""
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _clean(key: str, value: Any) -> str:
+    text = "" if value is None else str(value).strip()
+    if "\n" in text or "\r" in text:
+        # A newline would let one setting write arbitrary extra keys.
+        raise ValueError(f"{key}: a setting value cannot contain a line break")
+    return text
+
+
+def _write_atomically(path: Path, body: str) -> None:
+    """Replace the settings file in one step, never leaving it truncated."""
+    tmp = path.with_name(path.name + ".tmp")
+    # Created 0600 from the start: no window where the file is world-readable.
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(body)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        with suppress(OSError):
+            tmp.unlink()
+        raise
+
+
 def save(updates: dict[str, Any]) -> dict[str, Any]:
-    """Persist updates to the Application Support `.env` and os.environ.
+    """Persist updates to the per-user `.env` and to os.environ.
 
-    Keys absent from ``updates`` keep their current value. An explicit empty
-    string clears a value — that is the only way to remove a saved secret.
+    Keys absent from ``updates`` keep whatever is on disk. An explicit empty
+    string clears a value — the only way to remove a saved secret.
+
+    Values that merely happen to be in the environment (an ``export`` in a
+    shell profile, a CI secret) are *not* written: persisting a credential the
+    user never typed here would outlive the session they meant it for.
     """
-    ensure_app_dirs()
-    specs = all_specs()
-    known = {s.key: s for s in specs}
+    with _save_lock:
+        ensure_app_dirs()
+        known = {spec.key for spec in all_specs()}
+        unknown = set(updates) - known
+        if unknown:
+            raise ValueError(f"Unknown setting(s): {', '.join(sorted(unknown))}")
 
-    unknown = set(updates) - set(known)
-    if unknown:
-        raise ValueError(f"Unknown setting(s): {', '.join(sorted(unknown))}")
+        cleaned = {key: _clean(key, value) for key, value in updates.items()}
 
-    path = app_env_path()
-    # Start from what is already on disk so unrecognised keys survive a save.
-    current: dict[str, str] = {}
-    if path.is_file():
-        current = {k: v or "" for k, v in dotenv_values(path).items()}
-    for spec in specs:
-        current.setdefault(spec.key, get(spec.key) if is_set(spec.key) else "")
+        path = app_env_path()
+        # Start from disk so keys this build does not recognise still survive.
+        current: dict[str, str] = {}
+        if path.is_file():
+            current = {
+                k: v or "" for k, v in dotenv_values(path, interpolate=False).items()
+            }
+        current.update(cleaned)
 
-    for key, value in updates.items():
-        current[key] = "" if value is None else str(value).strip()
+        body = "\n".join(f"{key}={_quote(current[key])}" for key in sorted(current))
+        _write_atomically(path, body + "\n")
 
-    lines = [f"{key}={current[key]}" for key in sorted(current)]
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    # Owner-only, where the filesystem supports it (not on Windows).
-    with suppress(OSError):
-        path.chmod(0o600)
+        # Only the keys we just wrote are pushed into the process environment;
+        # unknown keys from disk are preserved on disk but never re-exported.
+        for key, value in cleaned.items():
+            os.environ[key] = value
 
-    for key, value in current.items():
-        os.environ[key] = value
-
-    _notify_changed(updates.keys())
+    _notify_changed(cleaned.keys())
     return read_public()
 
 
@@ -201,9 +254,10 @@ def _notify_changed(keys: Iterable[str]) -> None:  # noqa: D401
         if on_change is None:
             continue
         if changed & {s.key for s in provider.settings}:
-            # A provider failing to reset must never block saving settings.
-            with suppress(Exception):  # pragma: no cover
+            try:
                 on_change()
+            except Exception:  # A broken provider must not block saving.
+                log.warning("%s failed to reload its settings", provider.id, exc_info=True)
 
 
 # Load the user's `.env` as soon as settings are imported, so every entry point

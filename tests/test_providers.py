@@ -91,3 +91,58 @@ class TestRegistry:
     def test_default_id_prefers_a_ready_provider(self, monkeypatch):
         monkeypatch.setenv("REPLICATE_API_TOKEN", "r8_test")
         assert registry.get(registry.default_id()).availability().ready
+
+
+class TestRegistryOrdering:
+    def test_a_third_party_provider_can_register(self, fake_provider):
+        """`list.sort` empties the list while the key function runs, so display
+        order must not be derived from the list being sorted."""
+        from soundcraft.providers import registry
+
+        registry._ensure_loaded()
+        try:
+            registry.register(fake_provider)
+            assert fake_provider.id in registry.ids()
+            # Bundled backends keep their curated order, newcomers follow.
+            assert registry.ids()[: len(registry.BUILTIN_ORDER)] == list(
+                registry.BUILTIN_ORDER
+            )
+            assert registry.ids()[-1] == fake_provider.id
+        finally:
+            registry._providers.pop(fake_provider.id, None)
+            registry._registered_at.pop(fake_provider.id, None)
+            if fake_provider.id in registry._order:
+                registry._order.remove(fake_provider.id)
+
+
+class TestOptionalDependencyProbes:
+    def test_lyria_reports_missing_deps_instead_of_raising(self, monkeypatch):
+        """find_spec raises when the parent package is absent — the normal case
+        for a core install without the [lyria] extra."""
+        import importlib.util
+
+        from soundcraft.providers import registry
+
+        def explode(name, *args, **kwargs):
+            if name.startswith("google"):
+                raise ModuleNotFoundError("No module named 'google'")
+            return importlib.util.find_spec(name, *args, **kwargs)
+
+        monkeypatch.setattr("importlib.util.find_spec", explode)
+        status = registry.get("lyria").availability()
+        assert status.ready is False
+        assert "google-genai" in status.reason
+
+    def test_describe_all_survives_a_missing_optional_dependency(self, monkeypatch):
+        import importlib.util
+
+        from soundcraft.providers import registry
+
+        def explode(name, *args, **kwargs):
+            if name.startswith(("google", "torch", "transformers")):
+                raise ModuleNotFoundError(f"No module named {name!r}")
+            return importlib.util.find_spec(name, *args, **kwargs)
+
+        monkeypatch.setattr("importlib.util.find_spec", explode)
+        assert len(registry.describe_all()) == len(registry.ids())
+        assert registry.default_id()

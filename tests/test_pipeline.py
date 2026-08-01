@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from soundcraft.library import list_tracks, track_from_file
-from soundcraft.naming import next_sequence, prompt_to_slug, unique_path
+from soundcraft.naming import next_sequence, prompt_to_slug, reserve_path
 from soundcraft.pipeline import run_generate
 
 
@@ -26,11 +26,11 @@ class TestNaming:
         (output_dir / "dark_007.mp3").write_bytes(b"")
         assert next_sequence(output_dir, "dark") == 8
 
-    def test_unique_path_skips_an_occupied_slot(self, output_dir: Path):
+    def test_reserve_path_skips_an_occupied_slot(self, output_dir: Path):
         (output_dir / "dark_001.wav").write_bytes(b"")
         # A .flac sibling does not bump the counter, so 001 is contested.
         (output_dir / "dark_002.flac").write_bytes(b"")
-        assert unique_path(output_dir, "dark", ".flac").name == "dark_003.flac"
+        assert reserve_path(output_dir, "dark", ".flac").name == "dark_003.flac"
 
 
 class TestRunGenerate:

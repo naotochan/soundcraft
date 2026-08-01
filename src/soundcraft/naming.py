@@ -27,12 +27,21 @@ def next_sequence(output_dir: Path, slug: str) -> int:
     return highest + 1
 
 
-def unique_path(output_dir: Path, prompt: str, suffix: str) -> Path:
-    """Reserve an unused ``<slug>_NNN<suffix>`` path under ``output_dir``."""
+def reserve_path(output_dir: Path, prompt: str, suffix: str) -> Path:
+    """Claim an unused ``<slug>_NNN<suffix>`` path under ``output_dir``.
+
+    The file is created empty as part of claiming it. Checking `exists()` and
+    writing later is not enough: two concurrent generations both see the same
+    number free and the second silently overwrites the first.
+    """
     output_dir.mkdir(parents=True, exist_ok=True)
     slug = prompt_to_slug(prompt)
     seq = next_sequence(output_dir, slug)
-    # Concurrent generations can race for the same number; step past collisions.
-    while (candidate := output_dir / f"{slug}_{seq:03d}{suffix}").exists():
-        seq += 1
-    return candidate
+    while True:
+        candidate = output_dir / f"{slug}_{seq:03d}{suffix}"
+        try:
+            candidate.touch(exist_ok=False)  # O_CREAT | O_EXCL
+        except FileExistsError:
+            seq += 1
+        else:
+            return candidate

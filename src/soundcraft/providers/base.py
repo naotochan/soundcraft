@@ -14,6 +14,21 @@ from typing import Any, Literal
 ParamType = Literal["text", "number", "select", "bool"]
 
 
+def has_module(name: str) -> bool:
+    """True when ``name`` is importable.
+
+    ``find_spec`` raises rather than returning None when a parent package is
+    missing (``google.genai`` without ``google``), which is the normal state
+    for every optional extra — so probing has to be exception-safe.
+    """
+    from importlib.util import find_spec
+
+    try:
+        return find_spec(name) is not None
+    except (ImportError, ValueError, AttributeError):
+        return False
+
+
 class ProviderError(RuntimeError):
     """Generation failed for a reason worth showing the user verbatim."""
 
@@ -64,6 +79,15 @@ class ParamSpec:
 
     def coerce(self, value: Any) -> Any:
         """Validate and normalise one incoming value. Raises ValueError."""
+        if self.type == "bool":
+            # An unchecked checkbox posts nothing or "", which means False —
+            # never "fall back to a default of True".
+            if value is None or value == "":
+                return None if self.optional else bool(self.default)
+            if isinstance(value, bool):
+                return value
+            return str(value).strip().lower() in ("1", "true", "yes", "on")
+
         if value is None or value == "":
             if self.optional:
                 return None
@@ -83,11 +107,6 @@ class ParamSpec:
                 for v in (self.default, self.step, self.minimum, self.maximum)
             )
             return int(number) if is_int and number.is_integer() else number
-
-        if self.type == "bool":
-            if isinstance(value, bool):
-                return value
-            return str(value).strip().lower() in ("1", "true", "yes", "on")
 
         if self.type == "select":
             allowed = [o.value for o in self.options]
