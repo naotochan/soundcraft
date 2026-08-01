@@ -1,16 +1,22 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller spec for Soundcraft.app (macOS)."""
+"""PyInstaller spec for the Soundcraft desktop bundle (macOS, Windows, Linux)."""
 
+import os
+import sys
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_all, collect_data_files
 
-block_cipher = None
 root = Path(SPECPATH).resolve().parent
+sys.path.insert(0, str(root / "src"))
+from soundcraft.config import APP_VERSION  # noqa: E402
+
+is_macos = sys.platform == "darwin"
 
 datas = collect_data_files("soundcraft")
 binaries = []
 hiddenimports = [
+    # uvicorn resolves these at runtime, so PyInstaller cannot see them.
     "uvicorn.logging",
     "uvicorn.loops",
     "uvicorn.loops.auto",
@@ -22,19 +28,26 @@ hiddenimports = [
     "uvicorn.lifespan",
     "uvicorn.lifespan.on",
     "webview",
+    # Providers register themselves on import; the registry imports them by name.
+    "soundcraft.providers.comfyui",
+    "soundcraft.providers.gemini",
+    "soundcraft.providers.huggingface",
+    "soundcraft.providers.local",
+    "soundcraft.providers.replicate",
 ]
 
-for pkg in ("webview", "fastapi", "starlette", "google.genai", "pydantic"):
+for package in ("webview", "fastapi", "starlette", "google.genai", "pydantic"):
     try:
-        pkg_datas, pkg_binaries, pkg_hidden = collect_all(pkg)
-        datas += pkg_datas
-        binaries += pkg_binaries
-        hiddenimports += pkg_hidden
+        package_datas, package_binaries, package_hidden = collect_all(package)
+        datas += package_datas
+        binaries += package_binaries
+        hiddenimports += package_hidden
     except Exception:
-        pass
+        pass  # Optional dependency absent from this build environment.
 
-icon_path = root / "build" / "Soundcraft.icns"
-icon = str(icon_path) if icon_path.is_file() else None
+# scripts/build_app.py converts icon.png to the right format and points here.
+icon_env = os.environ.get("SOUNDCRAFT_ICON")
+icon = icon_env if icon_env and Path(icon_env).is_file() else None
 
 a = Analysis(
     [str(root / "packaging" / "run_app.py")],
@@ -45,14 +58,12 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
-    win_no_prefer_redirects=False,
-    win_private_assemblies=False,
-    cipher=block_cipher,
+    # Keep the bundle small: these ship with the [local] extra, not the app.
+    excludes=["torch", "transformers", "tkinter", "matplotlib", "pytest"],
     noarchive=False,
 )
 
-pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+pyz = PYZ(a.pure, a.zipped_data)
 
 exe = EXE(
     pyz,
@@ -66,7 +77,7 @@ exe = EXE(
     upx=True,
     console=False,
     disable_windowed_traceback=False,
-    argv_emulation=True,
+    argv_emulation=is_macos,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
@@ -84,20 +95,19 @@ coll = COLLECT(
     name="Soundcraft",
 )
 
-app = BUNDLE(
-    coll,
-    name="Soundcraft.app",
-    icon=icon,
-    bundle_identifier="com.naotochan.soundcraft",
-    info_plist={
-        "CFBundleName": "Soundcraft",
-        "CFBundleDisplayName": "Soundcraft",
-        "CFBundleShortVersionString": "0.6.0",
-        "CFBundleVersion": "0.6.0",
-        "NSHighResolutionCapable": True,
-        "LSMinimumSystemVersion": "12.0",
-        "NSAppTransportSecurity": {
-            "NSAllowsLocalNetworking": True,
+if is_macos:
+    app = BUNDLE(
+        coll,
+        name="Soundcraft.app",
+        icon=icon,
+        bundle_identifier="com.naotochan.soundcraft",
+        info_plist={
+            "CFBundleName": "Soundcraft",
+            "CFBundleDisplayName": "Soundcraft",
+            "CFBundleShortVersionString": APP_VERSION,
+            "CFBundleVersion": APP_VERSION,
+            "NSHighResolutionCapable": True,
+            "LSMinimumSystemVersion": "12.0",
+            "NSAppTransportSecurity": {"NSAllowsLocalNetworking": True},
         },
-    },
-)
+    )

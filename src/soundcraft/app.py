@@ -1,4 +1,9 @@
-"""Desktop app entry: embedded FastAPI + pywebview window."""
+"""Desktop app entry: embedded API server plus a native window.
+
+pywebview is an optional dependency — a headless server install should not need
+a GUI toolkit — so the import happens here, with an actionable message when it
+is missing.
+"""
 
 from __future__ import annotations
 
@@ -8,10 +13,32 @@ import time
 from collections.abc import Callable
 
 from soundcraft.config import (
+    APP_VERSION,
     DEFAULT_SERVER_HOST,
     DEFAULT_SERVER_PORT,
     enable_app_mode,
 )
+
+WINDOW_BACKGROUND = "#07090d"  # Matches the GUI's dark ground, so no white flash.
+
+
+def _free_port(host: str, preferred: int) -> int:
+    """Return the preferred port, or an OS-assigned one if it is taken.
+
+    Two copies of the app on one machine should both open rather than the
+    second dying on "address already in use".
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            probe.bind((host, preferred))
+            return preferred
+        except OSError:
+            pass
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind((host, 0))
+        return probe.getsockname()[1]
 
 
 def _wait_for_port(host: str, port: int, timeout: float = 30.0) -> None:
@@ -22,7 +49,7 @@ def _wait_for_port(host: str, port: int, timeout: float = 30.0) -> None:
                 return
         except OSError:
             time.sleep(0.1)
-    raise TimeoutError(f"Server did not start on {host}:{port}")
+    raise TimeoutError(f"The local server did not start on {host}:{port}")
 
 
 def _start_server(host: str, port: int) -> None:
@@ -39,8 +66,18 @@ def run_desktop_app(
     *,
     on_started: Callable[[], None] | None = None,
 ) -> None:
-    """Start local API and open a native window (no external browser)."""
+    """Start the local API and open a native window (no external browser)."""
+    try:
+        import webview
+    except ImportError as e:
+        raise SystemExit(
+            "The desktop window needs pywebview, which is not installed.\n"
+            '  uv pip install -e ".[app]"\n'
+            "Or run the browser GUI instead: soundcraft gui"
+        ) from e
+
     enable_app_mode()
+    port = _free_port(host, port)
 
     thread = threading.Thread(
         target=_start_server,
@@ -54,20 +91,16 @@ def run_desktop_app(
     if on_started:
         on_started()
 
-    import webview
-
-    url = f"http://{host}:{port}/"
-    window = webview.create_window(
-        "soundcraft",
-        url,
-        width=1100,
-        height=820,
-        min_size=(720, 560),
-        background_color="#12141a",
+    webview.create_window(
+        f"soundcraft {APP_VERSION}",
+        f"http://{host}:{port}/",
+        width=1180,
+        height=860,
+        min_size=(880, 620),
+        background_color=WINDOW_BACKGROUND,
     )
     webview.start()
-    # Window closed — process exits; daemon server thread dies with it.
-    _ = window
+    # The window closed: the process exits and the daemon server dies with it.
 
 
 def main() -> None:

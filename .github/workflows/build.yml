@@ -1,0 +1,89 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install -e ".[dev,lyria]"
+      - name: Lint
+        run: ruff check src tests
+      - name: Test
+        run: pytest
+
+  bundle:
+    # Desktop bundles are only worth building for a release.
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14        # Apple silicon
+            tag: macos-arm64
+          - os: macos-13        # Intel
+            tag: macos-x64
+          - os: windows-latest
+            tag: windows-x64
+          - os: ubuntu-22.04    # Oldest glibc we support
+            tag: linux-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install GTK/WebKit for pywebview
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-gi gir1.2-webkit2-4.1 libgirepository1.0-dev
+
+      - name: Install
+        run: pip install -e ".[app,lyria,build]" pillow
+
+      - name: Build
+        run: python scripts/build_app.py --skip-install
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: soundcraft-${{ matrix.tag }}
+          path: dist/*.zip
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: bundle
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*.zip
+          draft: true
+          generate_release_notes: true
+          body: |
+            These builds are **unsigned**.
+
+            - **macOS** — right-click `Soundcraft.app` → Open → Open. Only needed once.
+            - **Windows** — SmartScreen warns on first run: More info → Run anyway.
+            - **Linux** — unzip and run `./Soundcraft/Soundcraft`.
+
+            Prefer installing from source? `uv pip install -e ".[app]"`
