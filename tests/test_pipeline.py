@@ -138,6 +138,26 @@ class TestLibrary:
         (output_dir / "comfy_001.flac").write_bytes(b"fLaC")
         assert [t["format"] for t in list_tracks()] == ["flac"]
 
+    def test_limit_is_applied_before_sidecars_are_read(
+        self, registered_fake, output_dir: Path, monkeypatch
+    ):
+        for i in range(5):
+            run_generate(f"take {i}", backend="fake", output_dir=output_dir, raw=True)
+
+        import soundcraft.library as library
+
+        read: list[Path] = []
+        original = library._read_meta
+
+        def spy(audio: Path):
+            read.append(audio)
+            return original(audio)
+
+        monkeypatch.setattr(library, "_read_meta", spy)
+        tracks = library.list_tracks(limit=2)
+        assert len(tracks) == 2
+        assert len(read) == 2
+
 
 class TestDeletion:
     def test_deletes_the_audio_and_its_sidecar(self, registered_fake, output_dir: Path):

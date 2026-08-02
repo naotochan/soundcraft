@@ -162,9 +162,14 @@ def track_from_file(audio: Path) -> dict[str, Any]:
     }
 
 
-def list_tracks(*, limit: int = 200, backend: str | None = None) -> list[dict[str, Any]]:
-    """Scan library roots for audio files, newest first."""
-    found: set[Path] = set()
+def _library_files() -> list[Path]:
+    """Audio files across the library roots, newest mtime first.
+
+    Only ``stat`` is called here — sidecars stay unread so that a library with
+    thousands of files can be ranked before anything is parsed.
+    """
+    seen: set[Path] = set()
+    ranked: list[tuple[float, Path]] = []
     for root in library_roots():
         if not root.is_dir():
             continue
@@ -173,18 +178,44 @@ def list_tracks(*, limit: int = 200, backend: str | None = None) -> list[dict[st
         except OSError:
             continue
         for entry in entries:
-            if entry.suffix.lower() not in AUDIO_SUFFIXES or not entry.is_file():
+            if entry.suffix.lower() not in AUDIO_SUFFIXES:
                 continue
             try:
-                found.add(entry.resolve())
+                if not entry.is_file():
+                    continue
+                resolved = entry.resolve()
+                mtime = resolved.stat().st_mtime
             except OSError:
                 continue
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            ranked.append((mtime, resolved))
 
-    tracks = [track_from_file(path) for path in found]
-    if backend:
-        tracks = [t for t in tracks if t["backend"] == backend]
+    ranked.sort(key=lambda item: item[0], reverse=True)
+    return [path for _, path in ranked]
+
+
+def list_tracks(*, limit: int = 200, backend: str | None = None) -> list[dict[str, Any]]:
+    """Scan library roots for audio files, newest first.
+
+    Candidates are ordered by mtime first, so only the files that make the cut
+    have their sidecar read. Sidecars are written right after their audio, so
+    the two orderings agree except for files copied in after the fact — those
+    sort by when they landed here, which is what a history view wants anyway.
+    """
+    cap = max(1, min(limit, 1000))
+    tracks: list[dict[str, Any]] = []
+    for path in _library_files():
+        track = track_from_file(path)
+        if backend and track["backend"] != backend:
+            continue
+        tracks.append(track)
+        if len(tracks) >= cap:
+            break
+
     tracks.sort(key=lambda t: t.get("created_at") or "", reverse=True)
-    return tracks[: max(1, min(limit, 1000))]
+    return tracks
 
 
 def is_in_library(path: Path) -> bool:
