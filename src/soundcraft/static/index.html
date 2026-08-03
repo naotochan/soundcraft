@@ -1,0 +1,1740 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>soundcraft</title>
+  <style>
+    /* ---------------------------------------------------------------
+       Palette taken from the Echo Owl mark: near-black ground, cyan to
+       violet for anything active, green reserved for "ready".
+       --------------------------------------------------------------- */
+    :root {
+      --bg: #07090d;
+      --bg-panel: #0d1117;
+      --bg-raised: #141a23;
+      --bg-input: #0a0e14;
+      --line: #1e2732;
+      --line-strong: #2b3846;
+      --text: #e6edf5;
+      --text-dim: #8b9bb0;
+      --text-faint: #7d8da3;
+      --accent: #2ee6c5;
+      --accent-dim: #1a9e88;
+      --violet: #7c5cff;
+      --ok: #3ddc84;
+      --warn: #ffb454;
+      --bad: #ff5f73;
+      --radius: 10px;
+      --radius-sm: 6px;
+      --shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+      --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+      --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+      --rail-w: 248px;
+      --player-h: 68px;
+    }
+
+    :root[data-theme="light"] {
+      --bg: #f4f6f9;
+      --bg-panel: #ffffff;
+      --bg-raised: #f0f3f7;
+      --bg-input: #ffffff;
+      --line: #dde3ea;
+      --line-strong: #c3ccd8;
+      --text: #10161f;
+      --text-dim: #5b6879;
+      --text-faint: #5f6b7a;
+      --accent: #0d9b84;
+      --accent-dim: #0d9b84;
+      --violet: #5b3fd6;
+      --ok: #1a9c56;
+      --warn: #b5741a;
+      --bad: #d6394f;
+      --shadow: 0 12px 40px rgba(16, 22, 31, 0.12);
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      height: 100%;
+      margin: 0;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      font-size: 14px;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+      overflow: hidden;
+    }
+
+    button, input, select, textarea {
+      font-family: inherit;
+      font-size: inherit;
+      color: inherit;
+    }
+
+    button { cursor: pointer; }
+    button:disabled { cursor: not-allowed; opacity: 0.45; }
+
+    :focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    .hidden { display: none !important; }
+
+    /* --- shell ---------------------------------------------------- */
+
+    .app {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr) var(--player-h);
+      height: 100dvh;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 0 16px;
+      height: 52px;
+      border-bottom: 1px solid var(--line);
+      background: var(--bg-panel);
+      -webkit-app-region: drag;
+    }
+
+    .topbar button, .topbar .status { -webkit-app-region: no-drag; }
+
+    .brand {
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      margin: 0;
+      padding-left: 62px; /* clear the macOS traffic lights */
+    }
+
+    .brand span {
+      background: linear-gradient(96deg, var(--accent), var(--violet));
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+
+    .spacer { flex: 1; }
+
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 12px;
+      color: var(--text-dim);
+    }
+
+    .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--text-faint);
+      flex: none;
+    }
+    .dot.ok { background: var(--ok); box-shadow: 0 0 8px rgba(61, 220, 132, 0.5); }
+    .dot.bad { background: var(--bad); }
+    .dot.warn { background: var(--warn); }
+
+    .ghost {
+      background: transparent;
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius-sm);
+      color: var(--text-dim);
+      padding: 5px 12px;
+      font-size: 13px;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .ghost:hover:not(:disabled) { color: var(--text); border-color: var(--accent); }
+
+    .primary {
+      background: var(--accent);
+      border: none;
+      border-radius: var(--radius-sm);
+      color: #05221d;
+      font-weight: 600;
+      padding: 8px 18px;
+    }
+    .primary:hover:not(:disabled) { background: #47f0d3; }
+
+    .body {
+      display: grid;
+      grid-template-columns: var(--rail-w) minmax(0, 1fr);
+      min-height: 0;
+    }
+
+    /* --- backend rail --------------------------------------------- */
+
+    .rail {
+      border-right: 1px solid var(--line);
+      background: var(--bg-panel);
+      overflow-y: auto;
+      padding: 14px 12px 24px;
+    }
+
+    .rail-title {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.09em;
+      text-transform: uppercase;
+      color: var(--text-faint);
+      margin: 0 4px 10px;
+    }
+
+    .backend {
+      display: block;
+      width: 100%;
+      text-align: left;
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: var(--radius);
+      padding: 10px 11px;
+      margin-bottom: 4px;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .backend:hover { background: var(--bg-raised); }
+
+    .backend.active {
+      background: var(--bg-raised);
+      border-color: var(--accent-dim);
+    }
+
+    .backend-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 600;
+      font-size: 13px;
+    }
+
+    .backend-note {
+      display: block;
+      margin: 3px 0 0 15px;
+      font-size: 11.5px;
+      color: var(--text-faint);
+      line-height: 1.4;
+    }
+    .backend.active .backend-note { color: var(--text-dim); }
+
+    .tag-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin: 6px 0 0 15px;
+    }
+
+    .tag {
+      font-size: 10px;
+      font-family: var(--mono);
+      color: var(--text-faint);
+      border: 1px solid var(--line);
+      border-radius: 3px;
+      padding: 1px 5px;
+    }
+
+    /* --- stage ----------------------------------------------------- */
+
+    .stage {
+      overflow-y: auto;
+      padding: 20px 22px 32px;
+      min-width: 0;
+    }
+
+    .stage-inner {
+      max-width: 860px;
+      margin: 0 auto;
+    }
+
+    .composer {
+      background: var(--bg-panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 16px;
+    }
+
+    .field-label {
+      display: block;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+      color: var(--text-faint);
+      margin-bottom: 6px;
+    }
+
+    textarea#prompt {
+      width: 100%;
+      min-height: 92px;
+      resize: vertical;
+      background: var(--bg-input);
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius-sm);
+      padding: 11px 12px;
+      line-height: 1.55;
+    }
+    textarea#prompt:focus { border-color: var(--accent); outline: none; }
+
+    .params {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 12px;
+      margin-top: 14px;
+    }
+
+    .param-help {
+      font-size: 11px;
+      color: var(--text-faint);
+      margin: 4px 0 0;
+      line-height: 1.4;
+    }
+
+    input[type="text"], input[type="number"], input[type="password"],
+    input[type="search"], select {
+      width: 100%;
+      background: var(--bg-input);
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius-sm);
+      padding: 7px 10px;
+    }
+    input:focus, select:focus { border-color: var(--accent); outline: none; }
+
+    .checkline {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 13px;
+      color: var(--text-dim);
+      cursor: pointer;
+      user-select: none;
+    }
+    .checkline input { accent-color: var(--accent); }
+
+    .compose-actions {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-top: 16px;
+      flex-wrap: wrap;
+    }
+
+    .notice {
+      margin-top: 12px;
+      padding: 10px 12px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--line-strong);
+      background: var(--bg-raised);
+      font-size: 12.5px;
+      color: var(--text-dim);
+      line-height: 1.5;
+    }
+    .notice.warn { border-color: rgba(255, 180, 84, 0.4); }
+    .notice strong { color: var(--text); font-weight: 600; }
+
+    /* --- feed ------------------------------------------------------ */
+
+    .feed-head {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin: 26px 0 12px;
+    }
+
+    .tabs { display: flex; gap: 2px; }
+
+    .tab {
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: var(--text-faint);
+      font-size: 13px;
+      font-weight: 600;
+      padding: 5px 10px;
+    }
+    .tab.active { color: var(--text); border-bottom-color: var(--accent); }
+
+    .feed-tools {
+      margin-left: auto;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .feed-tools input[type="search"] { width: 200px; }
+
+    .track {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: var(--bg-panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 10px 12px;
+      margin-bottom: 6px;
+    }
+    .track.playing { border-color: var(--accent-dim); }
+
+    .play-btn {
+      flex: none;
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      border: 1px solid var(--line-strong);
+      background: var(--bg-raised);
+      color: var(--text);
+      display: grid;
+      place-items: center;
+      font-size: 11px;
+      line-height: 1;
+    }
+    .play-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .track.playing .play-btn { background: var(--accent); color: #05221d; border-color: var(--accent); }
+
+    .track-body { min-width: 0; flex: 1; }
+
+    .track-title {
+      font-size: 13.5px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .track-meta {
+      font-size: 11px;
+      font-family: var(--mono);
+      color: var(--text-faint);
+      margin-top: 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .track-actions {
+      display: flex;
+      gap: 4px;
+      flex: none;
+      opacity: 0;
+      transition: opacity 0.15s;
+    }
+    .track:hover .track-actions, .track:focus-within .track-actions { opacity: 1; }
+
+    .icon-btn {
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: var(--radius-sm);
+      color: var(--text-faint);
+      padding: 4px 8px;
+      font-size: 11.5px;
+    }
+    .icon-btn:hover { color: var(--text); border-color: var(--line-strong); }
+    .icon-btn.danger:hover { color: var(--bad); border-color: var(--bad); }
+
+    .job {
+      background: var(--bg-panel);
+      border: 1px solid var(--line);
+      border-left: 2px solid var(--line-strong);
+      border-radius: var(--radius);
+      padding: 11px 13px;
+      margin-bottom: 6px;
+    }
+    .job.running { border-left-color: var(--accent); }
+    .job.failed { border-left-color: var(--bad); }
+    .job.succeeded { border-left-color: var(--ok); }
+
+    .job-head {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      font-size: 11px;
+      font-family: var(--mono);
+      color: var(--text-faint);
+    }
+
+    .badge {
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      font-size: 10px;
+      border-radius: 3px;
+      padding: 2px 6px;
+      background: var(--bg-raised);
+      color: var(--text-dim);
+    }
+    .badge.running { color: var(--accent); }
+    .badge.failed { color: var(--bad); }
+    .badge.succeeded { color: var(--ok); }
+
+    .job-prompt { font-size: 13px; margin-top: 6px; }
+
+    .job-error {
+      margin-top: 7px;
+      font-size: 12px;
+      color: var(--bad);
+      line-height: 1.5;
+      font-family: var(--mono);
+    }
+
+    .bar {
+      height: 2px;
+      background: var(--line);
+      border-radius: 2px;
+      overflow: hidden;
+      margin-top: 9px;
+    }
+
+    .bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent), var(--violet));
+      transition: width 0.3s;
+    }
+
+    .bar-fill.indeterminate {
+      width: 35% !important;
+      animation: slide 1.3s ease-in-out infinite;
+    }
+
+    @keyframes slide {
+      0% { transform: translateX(-100%); }
+      100% { transform: translateX(340%); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .bar-fill.indeterminate { animation: none; width: 100% !important; opacity: 0.4; }
+      * { transition-duration: 0.01ms !important; }
+    }
+
+    .empty {
+      border: 1px dashed var(--line-strong);
+      border-radius: var(--radius);
+      padding: 28px 20px;
+      text-align: center;
+      color: var(--text-faint);
+      font-size: 13px;
+    }
+
+    /* --- player ---------------------------------------------------- */
+
+    .player {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 0 16px;
+      border-top: 1px solid var(--line);
+      background: var(--bg-panel);
+    }
+
+    .player.idle .player-main { opacity: 0.4; }
+
+    .transport { display: flex; gap: 4px; align-items: center; }
+
+    .transport button {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      border: 1px solid var(--line-strong);
+      background: var(--bg-raised);
+      color: var(--text);
+      display: grid;
+      place-items: center;
+      font-size: 11px;
+    }
+    .transport button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+
+    #playPause {
+      width: 38px;
+      height: 38px;
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #05221d;
+      font-size: 13px;
+    }
+    #playPause:hover:not(:disabled) { background: #47f0d3; color: #05221d; }
+
+    .player-main { flex: 1; min-width: 0; }
+
+    .player-title {
+      font-size: 12.5px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-bottom: 3px;
+    }
+
+    .seek-row {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      font-family: var(--mono);
+      font-size: 10.5px;
+      color: var(--text-faint);
+    }
+
+    input[type="range"] {
+      -webkit-appearance: none;
+      appearance: none;
+      background: transparent;
+      height: 14px;
+      cursor: pointer;
+    }
+    input[type="range"]::-webkit-slider-runnable-track {
+      height: 3px;
+      border-radius: 2px;
+      background: var(--line-strong);
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 11px;
+      height: 11px;
+      border-radius: 50%;
+      background: var(--accent);
+      margin-top: -4px;
+    }
+    input[type="range"]::-moz-range-track {
+      height: 3px;
+      border-radius: 2px;
+      background: var(--line-strong);
+    }
+    input[type="range"]::-moz-range-thumb {
+      width: 11px;
+      height: 11px;
+      border: none;
+      border-radius: 50%;
+      background: var(--accent);
+    }
+
+    #seek { flex: 1; }
+    #volume { width: 78px; }
+
+    .player-side {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex: none;
+    }
+
+    .toggle-btn {
+      background: transparent;
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius-sm);
+      color: var(--text-faint);
+      padding: 4px 9px;
+      font-size: 11px;
+      font-family: var(--mono);
+    }
+    .toggle-btn.on { color: var(--accent); border-color: var(--accent-dim); }
+
+    /* --- overlays --------------------------------------------------- */
+
+    .overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(4, 6, 9, 0.66);
+      backdrop-filter: blur(3px);
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      z-index: 50;
+    }
+
+    .sheet {
+      width: min(760px, 100%);
+      max-height: min(660px, 90vh);
+      background: var(--bg-panel);
+      border: 1px solid var(--line-strong);
+      border-radius: 14px;
+      box-shadow: var(--shadow);
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr) auto;
+      overflow: hidden;
+    }
+
+    .sheet-head {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .sheet-head h2 { margin: 0; font-size: 15px; font-weight: 600; }
+
+    .sheet-body { overflow-y: auto; padding: 6px 18px 18px; }
+
+    .sheet-foot {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 18px;
+      border-top: 1px solid var(--line);
+    }
+
+    .group-title {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.09em;
+      text-transform: uppercase;
+      color: var(--text-faint);
+      margin: 20px 0 8px;
+    }
+
+    .setting {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 260px;
+      gap: 16px;
+      align-items: start;
+      padding: 11px 0;
+      border-bottom: 1px solid var(--line);
+    }
+    .setting:last-child { border-bottom: none; }
+
+    .setting-label { font-size: 13px; }
+
+    .setting-help {
+      font-size: 11.5px;
+      color: var(--text-faint);
+      margin-top: 3px;
+      line-height: 1.45;
+    }
+
+    .setting-help a { color: var(--accent); }
+
+    .setting-state {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--text-faint);
+      margin-top: 4px;
+    }
+
+    /* --- onboarding -------------------------------------------------- */
+
+    .onboard-intro {
+      font-size: 13.5px;
+      color: var(--text-dim);
+      line-height: 1.6;
+      margin: 6px 0 4px;
+    }
+
+    .onboard-card {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 13px 14px;
+      margin-top: 10px;
+      background: var(--bg-raised);
+    }
+
+    .onboard-card h3 {
+      margin: 0 0 4px;
+      font-size: 13.5px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .onboard-card p {
+      margin: 0;
+      font-size: 12.5px;
+      color: var(--text-dim);
+      line-height: 1.55;
+    }
+
+    .onboard-fix {
+      font-family: var(--mono);
+      font-size: 11.5px;
+      color: var(--warn);
+      margin-top: 7px;
+      line-height: 1.5;
+    }
+
+    @media (max-width: 820px) {
+      .body { grid-template-columns: 1fr; }
+      .rail { display: none; }
+      .setting { grid-template-columns: 1fr; gap: 6px; }
+      .brand { padding-left: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <h1 class="brand">sound<span>craft</span></h1>
+      <div class="spacer"></div>
+      <div class="status">
+        <span class="dot" id="apiDot"></span>
+        <span id="apiLabel" aria-live="polite">connecting…</span>
+      </div>
+      <button class="ghost" type="button" id="settingsBtn">Settings</button>
+    </header>
+
+    <div class="body">
+      <aside class="rail">
+        <p class="rail-title">Backend</p>
+        <div id="backendList"></div>
+      </aside>
+
+      <main class="stage">
+        <div class="stage-inner">
+          <section class="composer">
+            <label class="field-label" for="prompt">Prompt</label>
+            <textarea id="prompt" placeholder="暗い、鼓動、インスタレーション&#10;dark ambient drone, heavy reverb, slow pulse"></textarea>
+
+            <div class="params" id="params"></div>
+
+            <div class="compose-actions">
+              <label class="checkline">
+                <input type="checkbox" id="raw" />
+                Use prompt as written
+              </label>
+              <label class="checkline" style="gap: 6px;">
+                Variations
+                <input type="number" id="count" min="1" max="10" value="1" style="width: 62px;" />
+              </label>
+              <div class="spacer"></div>
+              <button class="ghost" type="button" id="refineBtn">Preview refine</button>
+              <button class="primary" type="button" id="generateBtn">Generate</button>
+            </div>
+
+            <div class="notice hidden" id="composeNotice" role="status" aria-live="polite"></div>
+          </section>
+
+          <div class="feed-head">
+            <div class="tabs">
+              <button class="tab active" type="button" data-tab="session">Session</button>
+              <button class="tab" type="button" data-tab="library">Library</button>
+            </div>
+            <div class="feed-tools">
+              <input type="search" id="search" placeholder="Search prompts…" autocomplete="off" />
+              <button class="ghost" type="button" id="refreshBtn">Refresh</button>
+            </div>
+          </div>
+
+          <div id="feed"></div>
+        </div>
+      </main>
+    </div>
+
+    <div class="player idle" id="player">
+      <div class="transport">
+        <button type="button" id="prevBtn" title="Previous" aria-label="Previous track">⏮</button>
+        <button type="button" id="playPause" title="Play/Pause (Space)" aria-label="Play or pause">▶</button>
+        <button type="button" id="nextBtn" title="Next" aria-label="Next track">⏭</button>
+      </div>
+      <div class="player-main">
+        <div class="player-title" id="playerTitle">Nothing loaded</div>
+        <div class="seek-row">
+          <span id="elapsed">0:00</span>
+          <input type="range" id="seek" min="0" max="1000" value="0" aria-label="Seek" />
+          <span id="total">0:00</span>
+        </div>
+      </div>
+      <div class="player-side">
+        <button class="toggle-btn" type="button" id="loopBtn" title="Loop the current track">LOOP</button>
+        <input type="range" id="volume" min="0" max="100" value="90" aria-label="Volume" />
+      </div>
+      <audio id="audio" preload="metadata"></audio>
+    </div>
+  </div>
+
+  <!-- Settings ------------------------------------------------------- -->
+  <div class="overlay hidden" id="settingsOverlay" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+    <div class="sheet">
+      <div class="sheet-head">
+        <h2 id="settingsTitle">Settings</h2>
+        <div class="spacer"></div>
+        <input type="search" id="settingsSearch" placeholder="Filter…" style="width: 180px;" autocomplete="off" />
+        <button class="icon-btn" type="button" id="settingsClose" aria-label="Close settings">✕</button>
+      </div>
+      <div class="sheet-body" id="settingsBody"></div>
+      <div class="sheet-foot">
+        <span id="settingsStatus" role="status" aria-live="polite" style="font-size: 12px; color: var(--text-faint);"></span>
+        <div class="spacer"></div>
+        <button class="ghost" type="button" id="openOutputBtn">Open output folder</button>
+        <button class="primary" type="button" id="saveSettingsBtn">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Onboarding ----------------------------------------------------- -->
+  <div class="overlay hidden" id="onboardOverlay" role="dialog" aria-modal="true" aria-labelledby="onboardTitle">
+    <div class="sheet">
+      <div class="sheet-head">
+        <h2 id="onboardTitle">Pick a backend to get started</h2>
+        <div class="spacer"></div>
+        <button class="icon-btn" type="button" id="onboardClose" aria-label="Close">✕</button>
+      </div>
+      <div class="sheet-body">
+        <p class="onboard-intro">
+          soundcraft can generate through several engines. Set up whichever suits how you
+          work — you only need one, and you can add the rest later.
+        </p>
+        <div id="onboardList"></div>
+      </div>
+      <div class="sheet-foot">
+        <div class="spacer"></div>
+        <button class="primary" type="button" id="onboardSettingsBtn">Open Settings</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  "use strict";
+
+  const $ = (id) => document.getElementById(id);
+  const TOKEN_KEY = "soundcraft.token";
+  const THEME_KEY = "soundcraft.theme";
+  const BACKEND_KEY = "soundcraft.backend";
+
+  const state = {
+    providers: [],
+    backendId: null,
+    settings: null,
+    jobs: new Map(),      // id -> job
+    tracks: [],           // library
+    tab: "session",
+    queue: [],            // playable items in display order
+    current: null,        // { path, title }
+    generating: false,
+    seeking: false,
+  };
+
+  // -- utilities ----------------------------------------------------
+
+  function escapeHtml(value) {
+    return String(value ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#39;");
+  }
+
+  function formatTime(seconds) {
+    if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
+    const m = Math.floor(seconds / 60);
+    const s = Math.floor(seconds % 60);
+    return `${m}:${String(s).padStart(2, "0")}`;
+  }
+
+  function formatWhen(iso) {
+    if (!iso) return "";
+    const date = new Date(iso);
+    if (Number.isNaN(date.getTime())) return iso;
+    return date.toLocaleString(undefined, {
+      month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+    });
+  }
+
+  function mediaUrl(path, { download = false } = {}) {
+    const token = localStorage.getItem(TOKEN_KEY);
+    const query = new URLSearchParams({ path });
+    if (download) query.set("download", "1");
+    if (token) query.set("token", token);
+    return `/media?${query}`;
+  }
+
+  // -- api ----------------------------------------------------------
+
+  //  One shared prompt, so concurrent 401s do not each ask for a token.
+  let tokenPrompt = null;
+
+  function askForToken() {
+    if (!tokenPrompt) {
+      tokenPrompt = Promise.resolve().then(() => {
+        const entered = window.prompt("This server requires an API token:");
+        const token = (entered || "").trim();
+        if (token) localStorage.setItem(TOKEN_KEY, token);
+        return token;
+      }).finally(() => {
+        // Cleared on the next tick so everything waiting on this round shares it.
+        setTimeout(() => { tokenPrompt = null; }, 0);
+      });
+    }
+    return tokenPrompt;
+  }
+
+  function errorDetail(payload, status) {
+    const detail = payload && payload.detail;
+    if (typeof detail === "string") return detail;
+    // FastAPI validation errors arrive as a list of {loc, msg}.
+    if (Array.isArray(detail)) {
+      return detail
+        .map((d) => `${(d.loc || []).slice(1).join(".")}: ${d.msg}`)
+        .join(", ") || `Request failed (${status})`;
+    }
+    return `Request failed (${status})`;
+  }
+
+  async function api(path, options = {}, { retried = false } = {}) {
+    const token = localStorage.getItem(TOKEN_KEY);
+    const headers = { ...(options.headers || {}) };
+    if (options.body) headers["Content-Type"] = "application/json";
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+
+    const res = await fetch(path, { ...options, headers });
+
+    if (res.status === 401) {
+      if (retried) {
+        localStorage.removeItem(TOKEN_KEY);
+        throw new Error("That API token was rejected.");
+      }
+      const entered = await askForToken();
+      if (!entered) throw new Error("An API token is required.");
+      return api(path, options, { retried: true });
+    }
+
+    let payload = null;
+    try {
+      payload = await res.json();
+    } catch {
+      payload = null;
+    }
+
+    if (!res.ok) throw new Error(errorDetail(payload, res.status));
+    return payload;
+  }
+
+  // -- backends ------------------------------------------------------
+
+  function currentProvider() {
+    return state.providers.find((p) => p.id === state.backendId) || null;
+  }
+
+  function renderBackends() {
+    $("backendList").innerHTML = state.providers.map((provider) => {
+      const ready = provider.status.ready;
+      const active = provider.id === state.backendId;
+      const tags = provider.tags.slice(0, 3)
+        .map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("");
+      return `
+        <button class="backend ${active ? "active" : ""}" type="button" data-id="${escapeHtml(provider.id)}">
+          <span class="backend-head">
+            <span class="dot ${ready ? "ok" : "warn"}"></span>
+            ${escapeHtml(provider.label)}
+          </span>
+          <span class="backend-note">${escapeHtml(ready ? provider.summary : provider.status.reason)}</span>
+          <span class="tag-row">${tags}</span>
+        </button>`;
+    }).join("");
+  }
+
+  function renderParams() {
+    const provider = currentProvider();
+    const container = $("params");
+    if (!provider || !provider.params.length) {
+      container.innerHTML = "";
+      return;
+    }
+
+    container.innerHTML = provider.params.map((param) => {
+      const id = `param-${param.name}`;
+      const value = param.default ?? "";
+      let control;
+
+      if (param.type === "select") {
+        const matched = param.options.some((o) => String(o.value) === String(value));
+        // An optional select needs a way to say "unspecified"; without it the
+        // browser silently picks the first option and the server-side default
+        // (e.g. the configured ComfyUI workflow) never applies.
+        const blank = param.optional
+          ? `<option value=""${matched ? "" : " selected"}>— default —</option>`
+          : "";
+        const options = param.options.map((option) => {
+          const selected = String(option.value) === String(value) ? " selected" : "";
+          return `<option value="${escapeHtml(option.value)}"${selected}>${escapeHtml(option.label)}</option>`;
+        }).join("");
+        control = `<select id="${escapeHtml(id)}" data-param="${escapeHtml(param.name)}">${blank}${options}</select>`;
+      } else if (param.type === "bool") {
+        control = `<label class="checkline"><input type="checkbox" id="${escapeHtml(id)}" data-param="${escapeHtml(param.name)}" ${value ? "checked" : ""} /> enabled</label>`;
+      } else if (param.type === "number") {
+        const bounds = [
+          param.min !== null ? `min="${escapeHtml(param.min)}"` : "",
+          param.max !== null ? `max="${escapeHtml(param.max)}"` : "",
+          param.step !== null ? `step="${escapeHtml(param.step)}"` : "",
+        ].join(" ");
+        control = `<input type="number" id="${escapeHtml(id)}" data-param="${escapeHtml(param.name)}" value="${escapeHtml(value)}" ${bounds} placeholder="${param.optional ? "random" : ""}" />`;
+      } else {
+        control = `<input type="text" id="${escapeHtml(id)}" data-param="${escapeHtml(param.name)}" value="${escapeHtml(value)}" />`;
+      }
+
+      const unit = param.unit ? ` (${escapeHtml(param.unit)})` : "";
+      const help = param.help ? `<p class="param-help">${escapeHtml(param.help)}</p>` : "";
+      return `<div><label class="field-label" for="${escapeHtml(id)}">${escapeHtml(param.label)}${unit}</label>${control}${help}</div>`;
+    }).join("");
+  }
+
+  function collectParams() {
+    const params = {};
+    document.querySelectorAll("#params [data-param]").forEach((el) => {
+      const name = el.dataset.param;
+      if (el.type === "checkbox") {
+        params[name] = el.checked;
+      } else if (el.value !== "") {
+        params[name] = el.value;
+      }
+    });
+    return params;
+  }
+
+  function selectBackend(id) {
+    state.backendId = id;
+    localStorage.setItem(BACKEND_KEY, id);
+    renderBackends();
+    renderParams();
+    updateComposeNotice();
+  }
+
+  function syncGenerateButton() {
+    const button = $("generateBtn");
+    button.disabled = state.generating || !currentProvider();
+    button.textContent = state.generating ? "Generating…" : "Generate";
+  }
+
+  function updateComposeNotice() {
+    const notice = $("composeNotice");
+    const provider = currentProvider();
+    // Never derive the button from provider state alone: this runs while a
+    // generation is in flight (Refresh, saving settings) and would re-enable it.
+    syncGenerateButton();
+    if (!provider || provider.status.ready) {
+      notice.classList.add("hidden");
+      return;
+    }
+    notice.className = "notice warn";
+    notice.innerHTML = `<strong>${escapeHtml(provider.label)} is not ready.</strong> ${escapeHtml(provider.status.reason)} ${escapeHtml(provider.status.fix)}`;
+  }
+
+  async function loadProviders({ onboard = false } = {}) {
+    const data = await api("/providers");
+    state.providers = data.providers;
+
+    const saved = localStorage.getItem(BACKEND_KEY);
+    const known = state.providers.some((p) => p.id === saved);
+    state.backendId = known ? saved : data.default;
+
+    renderBackends();
+    renderParams();
+    updateComposeNotice();
+
+    $("refineBtn").disabled = !data.refiner_available;
+    $("refineBtn").title = data.refiner_available
+      ? "See what the local LLM makes of this prompt"
+      : "Set LM Studio URL and model in Settings to enable refinement";
+
+    // Only on first boot: settings saves also refresh providers, and popping
+    // the overlay over the open settings sheet would trap the user.
+    if (onboard && !state.providers.some((p) => p.status.ready)) showOnboarding(true);
+  }
+
+  // -- feed ----------------------------------------------------------
+
+  function matchesSearch(haystack) {
+    const query = $("search").value.trim().toLowerCase();
+    if (!query) return true;
+    return haystack.toLowerCase().includes(query);
+  }
+
+  function empty(message) {
+    return `<div class="empty">${escapeHtml(message)}</div>`;
+  }
+
+  function renderFeed() {
+    const feed = $("feed");
+    state.queue = [];
+    // One exit point, so the playing highlight is never left stale.
+    let html;
+
+    if (state.tab === "session") {
+      const jobs = [...state.jobs.values()]
+        .filter((job) => matchesSearch(`${job.request.prompt} ${job.request.backend || ""}`))
+        .reverse();
+      html = jobs.length
+        ? jobs.map(renderJob).join("")
+        : empty("Generations from this session appear here.");
+    } else if (state.libraryError) {
+      html = empty(`Could not read the library: ${state.libraryError}`);
+    } else {
+      const tracks = state.tracks.filter((track) =>
+        matchesSearch(`${track.title} ${track.prompt} ${track.input} ${track.name} ${track.backend}`));
+      state.queue = tracks.map((track) => ({ path: track.path, title: track.title }));
+
+      if (!state.tracks.length) {
+        html = empty("Nothing generated yet. Your library lives on disk — generated files show up here.");
+      } else if (!tracks.length) {
+        html = empty("No track matches that search.");
+      } else {
+        html = tracks.map(renderTrack).join("");
+      }
+    }
+
+    feed.innerHTML = html;
+    syncPlayingHighlight();
+  }
+
+  function renderJob(job) {
+    const result = job.result;
+    const prompt = result ? result.prompt : job.request.prompt;
+    const backend = job.request.backend || "";
+    const files = result ? result.files : [];
+
+    files.forEach((path) => {
+      state.queue.push({ path, title: prompt });
+    });
+
+    const progress = job.progress && job.progress.total
+      ? `<div class="bar"><div class="bar-fill" style="width: ${(job.progress.done / job.progress.total) * 100}%"></div></div>`
+      : `<div class="bar"><div class="bar-fill indeterminate"></div></div>`;
+
+    const showInput = result && result.input && result.input !== result.prompt
+      ? `<div class="track-meta">from: ${escapeHtml(result.input)}</div>`
+      : "";
+
+    return `
+      <article class="job ${job.status}">
+        <div class="job-head">
+          <span class="badge ${job.status}">${escapeHtml(job.status)}</span>
+          <span>${escapeHtml(backend)}</span>
+          <span>${escapeHtml(job.id)}</span>
+        </div>
+        <div class="job-prompt">${escapeHtml(prompt)}</div>
+        ${showInput}
+        ${job.error ? `<div class="job-error">${escapeHtml(job.error)}</div>` : ""}
+        ${job.status === "queued" || job.status === "running" ? progress : ""}
+        ${files.map((path) => trackRow({
+          path,
+          title: path.split("/").pop(),
+          meta: backend,
+        })).join("")}
+      </article>`;
+  }
+
+  function renderTrack(track) {
+    const bits = [track.backend, track.format];
+    if (track.duration) bits.push(`${track.duration}s`);
+    bits.push(track.size_label, formatWhen(track.created_at));
+    return trackRow({
+      path: track.path,
+      title: track.title || track.name,
+      meta: bits.filter(Boolean).join(" · "),
+      reusable: Boolean(track.input || track.prompt),
+      deletable: true,
+    });
+  }
+
+  function trackRow({ path, title, meta, reusable = false, deletable = false }) {
+    const safePath = escapeHtml(path);
+    return `
+      <div class="track" data-path="${safePath}">
+        <button class="play-btn" type="button" data-action="play" data-path="${safePath}" aria-label="Play ${escapeHtml(title)}">▶</button>
+        <div class="track-body">
+          <div class="track-title">${escapeHtml(title)}</div>
+          <div class="track-meta">${escapeHtml(meta)}</div>
+        </div>
+        <div class="track-actions">
+          ${reusable ? `<button class="icon-btn" type="button" data-action="reuse" data-path="${safePath}">Reuse</button>` : ""}
+          <a class="icon-btn" href="${mediaUrl(path, { download: true })}" download>Save</a>
+          ${deletable ? `<button class="icon-btn danger" type="button" data-action="delete" data-path="${safePath}">Delete</button>` : ""}
+        </div>
+      </div>`;
+  }
+
+  async function loadLibrary() {
+    try {
+      const data = await api("/library?limit=300");
+      state.tracks = data.tracks || [];
+      state.libraryError = null;
+    } catch (error) {
+      // Do not pass this off as an empty library — "nothing here yet" and
+      // "we could not ask" need different reactions from the user.
+      state.tracks = [];
+      state.libraryError = error.message;
+    }
+    if (state.tab === "library") renderFeed();
+  }
+
+  // -- generation -----------------------------------------------------
+
+  async function generate() {
+    const prompt = $("prompt").value.trim();
+    if (!prompt) {
+      $("prompt").focus();
+      return;
+    }
+
+    const provider = currentProvider();
+    if (provider && !provider.status.ready) {
+      showSettings(true);
+      return;
+    }
+
+    if (state.generating) return;
+    state.generating = true;
+    syncGenerateButton();
+    setTab("session");
+
+    try {
+      const count = Math.min(10, Math.max(1, Number($("count").value) || 1));
+      const job = await api("/jobs", {
+        method: "POST",
+        body: JSON.stringify({
+          prompt,
+          backend: state.backendId,
+          params: collectParams(),
+          count,
+          raw: $("raw").checked,
+        }),
+      });
+      state.jobs.set(job.id, job);
+      renderFeed();
+      await pollJob(job.id);
+    } catch (error) {
+      showNotice(error.message);
+    } finally {
+      state.generating = false;
+      syncGenerateButton();
+    }
+  }
+
+  async function pollJob(id) {
+    for (;;) {
+      const job = await api(`/jobs/${id}`);
+      state.jobs.set(job.id, job);
+      renderFeed();
+      if (job.status === "succeeded" || job.status === "failed") {
+        if (job.status === "succeeded") await loadLibrary();
+        return job;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+    }
+  }
+
+  function showNotice(message) {
+    const notice = $("composeNotice");
+    notice.className = "notice warn";
+    notice.textContent = message;
+    notice.classList.remove("hidden");
+  }
+
+  async function previewRefine() {
+    const prompt = $("prompt").value.trim();
+    if (!prompt) return;
+    const button = $("refineBtn");
+    button.disabled = true;
+    try {
+      const data = await api("/refine", {
+        method: "POST",
+        body: JSON.stringify({ prompt }),
+      });
+      if (data.changed) {
+        $("prompt").value = data.prompt;
+        $("raw").checked = true;
+        showNotice("Refined. “Use prompt as written” is now on so it is sent verbatim.");
+      } else {
+        showNotice("The refiner returned the prompt unchanged.");
+      }
+    } catch (error) {
+      showNotice(error.message);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  // -- player ----------------------------------------------------------
+
+  const audio = $("audio");
+
+  function play(path, title) {
+    if (state.current && state.current.path === path && !audio.paused) {
+      audio.pause();
+      return;
+    }
+    if (!state.current || state.current.path !== path) {
+      state.current = { path, title: title || path.split("/").pop() };
+      audio.src = mediaUrl(path);
+      $("playerTitle").textContent = state.current.title;
+      $("player").classList.remove("idle");
+    }
+    audio.play().catch((error) => showNotice(`Playback failed: ${error.message}`));
+  }
+
+  function step(offset) {
+    if (!state.current || !state.queue.length) return;
+    const index = state.queue.findIndex((item) => item.path === state.current.path);
+    // The queue is rebuilt on every render, so the playing track can drop out
+    // of it (search, tab switch). Stepping from a phantom position sends the
+    // user somewhere arbitrary; do nothing instead.
+    if (index === -1) return;
+    const next = state.queue[(index + offset + state.queue.length) % state.queue.length];
+    if (next) play(next.path, next.title);
+  }
+
+  function syncPlayingHighlight() {
+    document.querySelectorAll(".track").forEach((row) => {
+      const active = state.current && row.dataset.path === state.current.path && !audio.paused;
+      row.classList.toggle("playing", Boolean(active));
+      const button = row.querySelector('[data-action="play"]');
+      if (button) button.textContent = active ? "❚❚" : "▶";
+    });
+    $("playPause").textContent = audio.paused ? "▶" : "❚❚";
+  }
+
+  audio.addEventListener("play", syncPlayingHighlight);
+  audio.addEventListener("pause", syncPlayingHighlight);
+  audio.addEventListener("ended", () => {
+    if (!audio.loop) step(1);
+  });
+  audio.addEventListener("timeupdate", () => {
+    $("elapsed").textContent = formatTime(audio.currentTime);
+    // Not while the user is dragging: writing the value would yank the thumb
+    // back to the playhead several times a second.
+    if (audio.duration && !state.seeking) {
+      $("seek").value = String((audio.currentTime / audio.duration) * 1000);
+    }
+    $("seek").setAttribute(
+      "aria-valuetext",
+      `${formatTime(audio.currentTime)} of ${formatTime(audio.duration)}`,
+    );
+  });
+  audio.addEventListener("loadedmetadata", () => {
+    $("total").textContent = formatTime(audio.duration);
+  });
+  audio.addEventListener("error", () => {
+    if (audio.src) showNotice("Could not load that audio file. It may have been moved or deleted.");
+  });
+
+  $("seek").addEventListener("pointerdown", () => { state.seeking = true; });
+  $("seek").addEventListener("input", (event) => {
+    if (audio.duration) audio.currentTime = (event.target.value / 1000) * audio.duration;
+  });
+  $("seek").addEventListener("change", () => { state.seeking = false; });
+  $("seek").addEventListener("pointerup", () => { state.seeking = false; });
+  $("volume").addEventListener("input", (event) => {
+    audio.volume = event.target.value / 100;
+  });
+  $("playPause").addEventListener("click", () => {
+    if (!state.current) return;
+    if (audio.paused) audio.play(); else audio.pause();
+  });
+  $("prevBtn").addEventListener("click", () => step(-1));
+  $("nextBtn").addEventListener("click", () => step(1));
+  $("loopBtn").addEventListener("click", (event) => {
+    audio.loop = !audio.loop;
+    event.currentTarget.classList.toggle("on", audio.loop);
+  });
+
+  audio.volume = 0.9;
+
+  // -- settings ---------------------------------------------------------
+
+  function providerForSetting(key) {
+    const owner = state.providers.find((p) => p.settings.some((s) => s.key === key));
+    return owner ? owner.label : "General";
+  }
+
+  function renderSettings() {
+    if (!state.settings) return;
+    const { schema, values } = state.settings;
+
+    const groups = new Map();
+    schema.forEach((spec) => {
+      const group = providerForSetting(spec.key);
+      if (!groups.has(group)) groups.set(group, []);
+      groups.get(group).push(spec);
+    });
+
+    const appearance = `
+      <p class="group-title">Appearance</p>
+      <div class="setting">
+        <div>
+          <div class="setting-label">Theme</div>
+          <div class="setting-help">Applies immediately.</div>
+        </div>
+        <div>
+          <select id="themeSelect">
+            <option value="system">Follow the system</option>
+            <option value="dark">Dark</option>
+            <option value="light">Light</option>
+          </select>
+        </div>
+      </div>`;
+
+    const sections = [...groups.entries()].map(([group, specs]) => `
+      <p class="group-title">${escapeHtml(group)}</p>
+      ${specs.map((spec) => {
+        const entry = values[spec.key] || {};
+        const link = spec.url
+          ? ` <a href="${escapeHtml(spec.url)}" target="_blank" rel="noreferrer noopener">Get one ↗</a>`
+          : "";
+        const stateLine = spec.secret
+          ? `<div class="setting-state">${entry.set ? `saved: ${escapeHtml(entry.masked)}` : "not set"}</div>`
+          : "";
+        const value = spec.secret ? "" : escapeHtml(entry.value ?? "");
+        const placeholder = spec.secret && entry.set
+          ? "leave blank to keep"
+          : escapeHtml(spec.placeholder || "");
+        return `
+          <div class="setting" data-key="${escapeHtml(spec.key)}" data-search="${escapeHtml((spec.key + " " + spec.label + " " + spec.help).toLowerCase())}">
+            <div>
+              <div class="setting-label">${escapeHtml(spec.label)}</div>
+              <div class="setting-help">${escapeHtml(spec.help)}${link}</div>
+              ${stateLine}
+            </div>
+            <div>
+              <input type="${spec.secret ? "password" : "text"}"
+                     data-setting="${escapeHtml(spec.key)}"
+                     value="${value}"
+                     placeholder="${placeholder}"
+                     autocomplete="off" />
+            </div>
+          </div>`;
+      }).join("")}`).join("");
+
+    const paths = `
+      <p class="group-title">Locations</p>
+      <div class="setting">
+        <div>
+          <div class="setting-label">Output folder</div>
+          <div class="setting-state">${escapeHtml(state.settings.output_dir)}</div>
+        </div>
+        <div></div>
+      </div>
+      <div class="setting">
+        <div>
+          <div class="setting-label">ComfyUI workflows</div>
+          <div class="setting-help">Drop API-format workflow JSON here to make it selectable.</div>
+          <div class="setting-state">${escapeHtml(state.settings.workflows_dir)}</div>
+        </div>
+        <div></div>
+      </div>
+      <div class="setting">
+        <div>
+          <div class="setting-label">Settings file</div>
+          <div class="setting-state">${escapeHtml(state.settings.env_path)}</div>
+        </div>
+        <div></div>
+      </div>`;
+
+    $("settingsBody").innerHTML = appearance + sections + paths;
+    $("themeSelect").value = localStorage.getItem(THEME_KEY) || "system";
+    $("themeSelect").addEventListener("change", (event) => {
+      localStorage.setItem(THEME_KEY, event.target.value);
+      applyTheme();
+    });
+  }
+
+  async function loadSettings() {
+    state.settings = await api("/settings");
+    renderSettings();
+  }
+
+  async function saveSettings() {
+    const updates = {};
+    document.querySelectorAll("[data-setting]").forEach((input) => {
+      const key = input.dataset.setting;
+      const spec = state.settings.schema.find((s) => s.key === key);
+      const value = input.value.trim();
+      // A blank secret means "keep what is saved", not "clear it".
+      if (spec.secret && value === "") return;
+      updates[key] = value;
+    });
+
+    const button = $("saveSettingsBtn");
+    button.disabled = true;
+    $("settingsStatus").textContent = "Saving…";
+    try {
+      state.settings = await api("/settings", {
+        method: "PUT",
+        body: JSON.stringify(updates),
+      });
+      await loadProviders();
+      renderSettings();
+      $("settingsStatus").textContent = "Saved";
+      setTimeout(() => { $("settingsStatus").textContent = ""; }, 2200);
+    } catch (error) {
+      $("settingsStatus").textContent = error.message;
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  function showSettings(open) {
+    const overlay = $("settingsOverlay");
+    if (open === undefined) open = overlay.classList.contains("hidden");
+    overlay.classList.toggle("hidden", !open);
+    if (open) {
+      loadSettings().catch((error) => { $("settingsStatus").textContent = error.message; });
+      $("settingsSearch").focus();
+    }
+  }
+
+  $("settingsSearch").addEventListener("input", (event) => {
+    const query = event.target.value.trim().toLowerCase();
+    document.querySelectorAll("#settingsBody .setting[data-search]").forEach((row) => {
+      row.classList.toggle("hidden", Boolean(query) && !row.dataset.search.includes(query));
+    });
+  });
+
+  // -- onboarding --------------------------------------------------------
+
+  function showOnboarding(open) {
+    const overlay = $("onboardOverlay");
+    overlay.classList.toggle("hidden", !open);
+    if (!open) return;
+
+    $("onboardList").innerHTML = state.providers.map((provider) => `
+      <div class="onboard-card">
+        <h3><span class="dot ${provider.status.ready ? "ok" : "warn"}"></span>${escapeHtml(provider.label)}</h3>
+        <p>${escapeHtml(provider.summary)}</p>
+        ${provider.speed ? `<p style="margin-top:4px;color:var(--text-faint);font-size:11.5px;">Speed: ${escapeHtml(provider.speed)}</p>` : ""}
+        ${provider.status.ready ? "" : `<div class="onboard-fix">→ ${escapeHtml(provider.status.fix || provider.status.reason)}</div>`}
+      </div>`).join("");
+  }
+
+  // -- theme --------------------------------------------------------------
+
+  function applyTheme() {
+    const preference = localStorage.getItem(THEME_KEY) || "system";
+    const resolved = preference === "system"
+      ? (window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark")
+      : preference;
+    document.documentElement.dataset.theme = resolved;
+  }
+
+  window.matchMedia("(prefers-color-scheme: light)").addEventListener("change", applyTheme);
+
+  // -- health --------------------------------------------------------------
+
+  async function checkHealth() {
+    try {
+      const data = await (await fetch("/health")).json();
+      state.version = data.version;
+      $("apiDot").className = "dot ok";
+      const ready = state.providers.filter((p) => p.status.ready).length;
+      $("apiLabel").textContent = `v${data.version} · ${ready} backend${ready === 1 ? "" : "s"} ready`;
+    } catch {
+      $("apiDot").className = "dot bad";
+      $("apiLabel").textContent = "server unreachable";
+    }
+  }
+
+  // -- events ---------------------------------------------------------------
+
+  function setTab(tab) {
+    state.tab = tab;
+    document.querySelectorAll(".tab").forEach((button) => {
+      button.classList.toggle("active", button.dataset.tab === tab);
+    });
+    renderFeed();
+  }
+
+  $("backendList").addEventListener("click", (event) => {
+    const button = event.target.closest(".backend");
+    if (button) selectBackend(button.dataset.id);
+  });
+
+  document.querySelector(".tabs").addEventListener("click", (event) => {
+    const button = event.target.closest(".tab");
+    if (button) setTab(button.dataset.tab);
+  });
+
+  $("feed").addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-action]");
+    if (!button) return;
+    const path = button.dataset.path;
+
+    if (button.dataset.action === "play") {
+      const item = state.queue.find((entry) => entry.path === path);
+      play(path, item && item.title);
+    } else if (button.dataset.action === "reuse") {
+      const track = state.tracks.find((entry) => entry.path === path);
+      if (track) {
+        $("prompt").value = track.input || track.prompt || track.title;
+        $("prompt").focus();
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }
+    } else if (button.dataset.action === "delete") {
+      if (!window.confirm("Delete this track and its metadata from disk?")) return;
+      try {
+        await api(`/library?path=${encodeURIComponent(path)}`, { method: "DELETE" });
+        if (state.current && state.current.path === path) {
+          audio.pause();
+          // Drop the source too, or the element keeps pointing at a file that
+          // no longer exists and fires a spurious error.
+          audio.removeAttribute("src");
+          audio.load();
+          state.current = null;
+          $("playerTitle").textContent = "Nothing loaded";
+          $("player").classList.add("idle");
+        }
+        await loadLibrary();
+        renderFeed();
+      } catch (error) {
+        showNotice(error.message);
+      }
+    }
+  });
+
+  $("generateBtn").addEventListener("click", generate);
+  $("refineBtn").addEventListener("click", previewRefine);
+  $("refreshBtn").addEventListener("click", () => { loadProviders(); loadLibrary(); });
+  $("search").addEventListener("input", renderFeed);
+  $("settingsBtn").addEventListener("click", () => showSettings());
+  $("settingsClose").addEventListener("click", () => showSettings(false));
+  $("saveSettingsBtn").addEventListener("click", saveSettings);
+  $("onboardClose").addEventListener("click", () => showOnboarding(false));
+  $("onboardSettingsBtn").addEventListener("click", () => {
+    showOnboarding(false);
+    showSettings(true);
+  });
+  $("openOutputBtn").addEventListener("click", async () => {
+    try {
+      await api("/settings/open-output", { method: "POST" });
+    } catch (error) {
+      $("settingsStatus").textContent = error.message;
+    }
+  });
+
+  $("settingsOverlay").addEventListener("mousedown", (event) => {
+    if (event.target === $("settingsOverlay")) showSettings(false);
+  });
+
+  $("prompt").addEventListener("keydown", (event) => {
+    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") generate();
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      showSettings(false);
+      showOnboarding(false);
+      return;
+    }
+    // Space toggles playback — but only when nothing interactive has focus.
+    // Space is how a keyboard user activates a <button>; stealing it here
+    // would make every control in the app unusable.
+    const el = document.activeElement;
+    const tag = el ? el.tagName : "";
+    const interactive =
+      ["INPUT", "TEXTAREA", "SELECT", "BUTTON", "A"].includes(tag) ||
+      (el && el.isContentEditable);
+    if (event.code === "Space" && !interactive && state.current) {
+      event.preventDefault();
+      if (audio.paused) audio.play(); else audio.pause();
+    }
+  });
+
+  // -- boot -------------------------------------------------------------------
+
+  applyTheme();
+  renderFeed();
+  // Sequential, not parallel: two concurrent 401s would prompt for the token
+  // twice before either could store it.
+  loadProviders({ onboard: true })
+    .then(loadLibrary)
+    .then(checkHealth)
+    .catch((error) => showNotice(error.message));
+  setInterval(checkHealth, 20000);
+  </script>
+</body>
+</html>

@@ -1,24 +1,69 @@
-import os
-from pathlib import Path
+"""Application constants and settings bootstrap.
 
-from dotenv import load_dotenv
+Paths live in :mod:`soundcraft.paths`, persisted values in
+:mod:`soundcraft.settings`, and backend definitions in
+:mod:`soundcraft.providers`. This module holds what is left: constants and the
+import-time load of the user's `.env`.
+"""
 
-load_dotenv()
+from __future__ import annotations
 
-REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN", "")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _installed_version
 
-MODELS = ["melody-large", "stereo-melody-large", "large", "stereo-large"]
+from soundcraft import settings
+from soundcraft.paths import (  # re-exported for convenience
+    APP_NAME,
+    app_env_path,
+    app_support_dir,
+    default_output_dir,
+    documents_dir,
+    ensure_app_dirs,
+    is_app_mode,
+    workflows_dir,
+)
+from soundcraft.paths import (
+    enable_app_mode as _enable_app_mode,
+)
 
-DEFAULT_MODEL = "melody-large"
-DEFAULT_DURATION = 30
-DEFAULT_OUTPUT_DIR = Path("output")
+try:
+    # pyproject.toml is the single source of truth; this reads what pip/uv
+    # recorded for the installed (or editable-installed) package.
+    APP_VERSION = _installed_version("soundcraft")
+except PackageNotFoundError:
+    APP_VERSION = "0.0.0+unknown"
 
-REPLICATE_MODEL_VERSION = "671ac645ce5e552cc63a54a2bbff63fcf798043055d2dac5fc9e36a837eedcfb"
+DEFAULT_SERVER_HOST = "127.0.0.1"
+DEFAULT_SERVER_PORT = 8765
+DEFAULT_COUNT = 1
 
-LM_STUDIO_URL = os.getenv("LM_STUDIO_URL", "http://localhost:1234")
-LM_STUDIO_MODEL = os.getenv("LM_STUDIO_MODEL", "liquid/lfm2-24b-a2b")
+#: Hosts that are safe to bind without an API token.
+LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 
-BACKENDS = ["musicgen", "lyria3"]
-DEFAULT_BACKEND = "musicgen"
-LYRIA3_MODEL = "lyria-3-clip-preview"
+
+def enable_app_mode() -> None:
+    """Switch to desktop-app paths and reload settings from Application Support."""
+    _enable_app_mode()
+    settings.load(override=True)
+
+
+# Load `.env` for CLI and server entry points. The desktop app calls
+# enable_app_mode() first, which reloads with app-mode precedence.
+settings.load(override=False)
+
+__all__ = [
+    "APP_NAME",
+    "APP_VERSION",
+    "DEFAULT_COUNT",
+    "DEFAULT_SERVER_HOST",
+    "DEFAULT_SERVER_PORT",
+    "LOOPBACK_HOSTS",
+    "app_env_path",
+    "app_support_dir",
+    "default_output_dir",
+    "documents_dir",
+    "enable_app_mode",
+    "ensure_app_dirs",
+    "is_app_mode",
+    "workflows_dir",
+]

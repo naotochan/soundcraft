@@ -1,13 +1,48 @@
 [project]
 name = "soundcraft"
-version = "0.1.0"
-description = "CLI tool for generating instrumental music via MusicGen and Lyria3"
+version = "0.7.0"
+description = "CLI, desktop app, GUI and local API for generating music with pluggable backends (ComfyUI, local MusicGen, Replicate, Hugging Face, Lyria)"
+readme = "README.md"
+license = { file = "LICENSE" }
 requires-python = ">=3.10"
-dependencies = [
-    "requests",
-    "python-dotenv",
-    "google-genai",
+keywords = ["music", "generative", "musicgen", "comfyui", "touchdesigner", "media-art"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Multimedia :: Sound/Audio",
 ]
+
+# The core install is deliberately small: a CLI, the API server and the ComfyUI
+# bridge work with nothing but HTTP. Heavier backends live in extras.
+dependencies = [
+    "requests>=2.31",
+    "python-dotenv>=1.0",
+    "fastapi>=0.110",
+    "pydantic>=2.0",       # imported directly, not just via fastapi
+    "uvicorn[standard]>=0.27",
+]
+
+[project.optional-dependencies]
+# Desktop window (pywebview). Not wanted on a headless server.
+app = ["pywebview>=5.0"]
+# Google Lyria via the Gemini API.
+lyria = ["google-genai>=1.0"]
+# On-device generation. Large download; install only if you want offline runs.
+local = ["torch>=2.1", "transformers>=4.40", "numpy>=1.24"]
+build = [
+    "pyinstaller>=6.0",
+    "pillow>=10.0; sys_platform == 'win32'",  # icon.png -> .ico
+]
+dev = ["pytest>=8.0", "httpx>=0.27", "ruff>=0.6"]
+# Everything except the multi-gigabyte local stack.
+all = ["soundcraft[app,lyria]"]
+
+[project.urls]
+Homepage = "https://github.com/naotochan/soundcraft"
+Issues = "https://github.com/naotochan/soundcraft/issues"
 
 [project.scripts]
 soundcraft = "soundcraft.cli:main"
@@ -18,3 +53,18 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+soundcraft = ["static/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["B008"]  # FastAPI depends on callables in defaults.
