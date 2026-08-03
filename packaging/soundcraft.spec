@@ -5,7 +5,7 @@ import os
 import sys
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_submodules, copy_metadata
 
 root = Path(SPECPATH).resolve().parent
 sys.path.insert(0, str(root / "src"))
@@ -13,7 +13,10 @@ from soundcraft.config import APP_VERSION  # noqa: E402
 
 is_macos = sys.platform == "darwin"
 
-datas = collect_data_files("soundcraft")
+# importlib.metadata.version() (used at runtime for APP_VERSION) reads the
+# .dist-info directory, which collect_data_files() does not pick up — without
+# this, the frozen bundle falls back to "0.0.0+unknown" at every call site.
+datas = collect_data_files("soundcraft") + copy_metadata("soundcraft")
 binaries = []
 hiddenimports = [
     # uvicorn resolves these at runtime, so PyInstaller cannot see them.

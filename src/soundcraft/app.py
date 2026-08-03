@@ -126,6 +126,12 @@ def run_desktop_app(
         # it because everything is importable from source. Getting this far
         # proves webview, uvicorn and the providers all loaded and the embedded
         # server actually answers, without needing a display to open a window on.
+        # The version check catches the other frozen-only failure mode: PyInstaller
+        # not bundling the package's .dist-info, which silently drops APP_VERSION
+        # to its "unknown" fallback everywhere it is displayed.
+        if APP_VERSION == "0.0.0+unknown":
+            raise SystemExit("APP_VERSION resolved to the unknown fallback in the frozen bundle.")
+        print(f"SOUNDCRAFT_SMOKE_TEST=1: server answered (version {APP_VERSION}), skipping window")
         return
 
     webview.create_window(
