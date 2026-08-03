@@ -951,11 +951,17 @@
     return null;
   }
 
+  // Input types that support a text selection range — reading .selectionStart
+  // on e.g. type="number" or "checkbox" throws InvalidStateError per spec.
+  const SELECTABLE_INPUT_TYPES = new Set(["text", "search", "password", "tel", "url"]);
+
   function preserveFocus(container, update) {
     const active = document.activeElement;
     const inside = active && container.contains(active);
     const selector = inside ? focusSelector(active) : null;
-    const selection = selector && "selectionStart" in active
+    const canSelect = active && "selectionStart" in active
+      && (active.tagName !== "INPUT" || SELECTABLE_INPUT_TYPES.has(active.type));
+    const selection = selector && canSelect
       ? [active.selectionStart, active.selectionEnd]
       : null;
 
@@ -1354,7 +1360,7 @@
         </div>
         <div class="track-actions">
           ${reusable ? `<button class="icon-btn" type="button" data-action="reuse" data-path="${safePath}">Reuse</button>` : ""}
-          <a class="icon-btn" href="${mediaUrl(path, { download: true })}" download>Save</a>
+          <a class="icon-btn" data-action="save" data-path="${safePath}" href="${mediaUrl(path, { download: true })}" download>Save</a>
           ${deletable ? `<button class="icon-btn danger" type="button" data-action="delete" data-path="${safePath}">Delete</button>` : ""}
         </div>
       </div>`;
