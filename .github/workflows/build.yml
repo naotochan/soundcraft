@@ -66,13 +66,29 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-gi gir1.2-webkit2-4.1 libgirepository1.0-dev
+          sudo apt-get install -y python3-gi gir1.2-webkit2-4.1 libgirepository1.0-dev xvfb
 
       - name: Install
         run: pip install -e ".[app,lyria,build]"
 
       - name: Build
         run: python scripts/build_app.py --skip-install
+
+      - name: Smoke test the frozen bundle
+        shell: bash
+        env:
+          SOUNDCRAFT_SMOKE_TEST: "1"
+        run: |
+          case "${{ runner.os }}" in
+            macOS)   bin="dist/Soundcraft.app/Contents/MacOS/Soundcraft" ;;
+            Windows) bin="dist/Soundcraft/Soundcraft.exe" ;;
+            Linux)   bin="dist/Soundcraft/Soundcraft" ;;
+          esac
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            xvfb-run -a "$bin"
+          else
+            "$bin"
+          fi
 
       - uses: actions/upload-artifact@v4
         with:

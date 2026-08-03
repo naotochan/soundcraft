@@ -7,6 +7,7 @@ is missing.
 
 from __future__ import annotations
 
+import os
 import socket
 import threading
 import time
@@ -118,6 +119,14 @@ def run_desktop_app(
 
     if on_started:
         on_started()
+
+    if os.environ.get("SOUNDCRAFT_SMOKE_TEST") == "1":
+        # A frozen bundle's biggest failure mode is a missing hidden import that
+        # only shows up once PyInstaller has packed it — dev installs never hit
+        # it because everything is importable from source. Getting this far
+        # proves webview, uvicorn and the providers all loaded and the embedded
+        # server actually answers, without needing a display to open a window on.
+        return
 
     webview.create_window(
         f"soundcraft {APP_VERSION}",
