@@ -8,6 +8,9 @@ import-time load of the user's `.env`.
 
 from __future__ import annotations
 
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _installed_version
+
 from soundcraft import settings
 from soundcraft.paths import (  # re-exported for convenience
     APP_NAME,
@@ -23,7 +26,12 @@ from soundcraft.paths import (
     enable_app_mode as _enable_app_mode,
 )
 
-APP_VERSION = "0.7.0"
+try:
+    # pyproject.toml is the single source of truth; this reads what pip/uv
+    # recorded for the installed (or editable-installed) package.
+    APP_VERSION = _installed_version("soundcraft")
+except PackageNotFoundError:
+    APP_VERSION = "0.0.0+unknown"
 
 DEFAULT_SERVER_HOST = "127.0.0.1"
 DEFAULT_SERVER_PORT = 8765
