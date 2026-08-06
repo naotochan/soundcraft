@@ -801,9 +801,9 @@
           </section>
 
           <div class="feed-head">
-            <div class="tabs">
-              <button class="tab active" type="button" data-tab="session">Session</button>
-              <button class="tab" type="button" data-tab="library">Library</button>
+            <div class="tabs" role="tablist" aria-label="Feed source">
+              <button class="tab active" type="button" role="tab" id="tab-session" aria-selected="true" aria-controls="feed" data-tab="session">Session</button>
+              <button class="tab" type="button" role="tab" id="tab-library" aria-selected="false" aria-controls="feed" tabindex="-1" data-tab="library">Library</button>
             </div>
             <div class="feed-tools">
               <input type="search" id="search" placeholder="Search prompts…" autocomplete="off" />
@@ -811,7 +811,7 @@
             </div>
           </div>
 
-          <div id="feed"></div>
+          <div id="feed" role="tabpanel" aria-labelledby="tab-session"></div>
         </div>
       </main>
     </div>
@@ -839,7 +839,7 @@
   </div>
 
   <!-- Settings ------------------------------------------------------- -->
-  <div class="overlay hidden" id="settingsOverlay" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+  <div class="overlay hidden" id="settingsOverlay" role="dialog" aria-modal="true" aria-labelledby="settingsTitle" tabindex="-1">
     <div class="sheet">
       <div class="sheet-head">
         <h2 id="settingsTitle">Settings</h2>
@@ -858,7 +858,7 @@
   </div>
 
   <!-- Onboarding ----------------------------------------------------- -->
-  <div class="overlay hidden" id="onboardOverlay" role="dialog" aria-modal="true" aria-labelledby="onboardTitle">
+  <div class="overlay hidden" id="onboardOverlay" role="dialog" aria-modal="true" aria-labelledby="onboardTitle" tabindex="-1">
     <div class="sheet">
       <div class="sheet-head">
         <h2 id="onboardTitle">Pick a backend to get started</h2>
@@ -935,6 +935,99 @@
     return `/media?${query}`;
   }
 
+  // -- focus ----------------------------------------------------------
+
+  // Identifies a focused element by the data attribute that survives an
+  // innerHTML rebuild (its DOM node does not), so focus can be restored to
+  // "the same track's play button" rather than lost to <body>.
+  function focusSelector(el) {
+    if (el.dataset.action && el.dataset.path) {
+      return `[data-action="${CSS.escape(el.dataset.action)}"][data-path="${CSS.escape(el.dataset.path)}"]`;
+    }
+    if (el.dataset.setting) return `[data-setting="${CSS.escape(el.dataset.setting)}"]`;
+    if (el.dataset.param) return `[data-param="${CSS.escape(el.dataset.param)}"]`;
+    if (el.dataset.id) return `[data-id="${CSS.escape(el.dataset.id)}"]`;
+    if (el.id) return `#${CSS.escape(el.id)}`;
+    return null;
+  }
+
+  // Input types that support a text selection range — reading .selectionStart
+  // on e.g. type="number" or "checkbox" throws InvalidStateError per spec.
+  const SELECTABLE_INPUT_TYPES = new Set(["text", "search", "password", "tel", "url"]);
+
+  function preserveFocus(container, update) {
+    const active = document.activeElement;
+    const inside = active && container.contains(active);
+    const selector = inside ? focusSelector(active) : null;
+    const canSelect = active && "selectionStart" in active
+      && (active.tagName !== "INPUT" || SELECTABLE_INPUT_TYPES.has(active.type));
+    const selection = selector && canSelect
+      ? [active.selectionStart, active.selectionEnd]
+      : null;
+
+    try {
+      update();
+    } finally {
+      if (selector) {
+        const restored = container.querySelector(selector);
+        if (restored) {
+          restored.focus();
+          if (selection && "setSelectionRange" in restored) {
+            try {
+              restored.setSelectionRange(selection[0], selection[1]);
+            } catch {
+              // Not every restored input type supports range selection (e.g. number).
+            }
+          }
+        }
+      }
+    }
+  }
+
+  function focusableElements(container) {
+    return [...container.querySelectorAll(
+      'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    )].filter((el) => el.offsetParent !== null);
+  }
+
+  // A dialog must not let Tab escape to the page underneath, and closing it
+  // should hand focus back to whatever opened it rather than dropping it to
+  // <body>. Focusables are re-queried on every Tab press so content the
+  // dialog renders after opening (e.g. settings fields) is included.
+  function createFocusTrap(overlay) {
+    let previouslyFocused = null;
+
+    function onKeydown(event) {
+      if (event.key !== "Tab") return;
+      const focusables = focusableElements(overlay);
+      if (!focusables.length) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+
+    return {
+      activate() {
+        previouslyFocused = document.activeElement;
+        overlay.addEventListener("keydown", onKeydown);
+        const focusables = focusableElements(overlay);
+        (focusables[0] || overlay).focus();
+      },
+      deactivate() {
+        overlay.removeEventListener("keydown", onKeydown);
+        if (previouslyFocused && document.body.contains(previouslyFocused)) {
+          previouslyFocused.focus();
+        }
+      },
+    };
+  }
+
   // -- api ----------------------------------------------------------
 
   //  One shared prompt, so concurrent 401s do not each ask for a token.
@@ -1003,21 +1096,24 @@
   }
 
   function renderBackends() {
-    $("backendList").innerHTML = state.providers.map((provider) => {
-      const ready = provider.status.ready;
-      const active = provider.id === state.backendId;
-      const tags = provider.tags.slice(0, 3)
-        .map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("");
-      return `
-        <button class="backend ${active ? "active" : ""}" type="button" data-id="${escapeHtml(provider.id)}">
-          <span class="backend-head">
-            <span class="dot ${ready ? "ok" : "warn"}"></span>
-            ${escapeHtml(provider.label)}
-          </span>
-          <span class="backend-note">${escapeHtml(ready ? provider.summary : provider.status.reason)}</span>
-          <span class="tag-row">${tags}</span>
-        </button>`;
-    }).join("");
+    const container = $("backendList");
+    preserveFocus(container, () => {
+      container.innerHTML = state.providers.map((provider) => {
+        const ready = provider.status.ready;
+        const active = provider.id === state.backendId;
+        const tags = provider.tags.slice(0, 3)
+          .map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("");
+        return `
+          <button class="backend ${active ? "active" : ""}" type="button" data-id="${escapeHtml(provider.id)}">
+            <span class="backend-head">
+              <span class="dot ${ready ? "ok" : "warn"}"></span>
+              ${escapeHtml(provider.label)}
+            </span>
+            <span class="backend-note">${escapeHtml(ready ? provider.summary : provider.status.reason)}</span>
+            <span class="tag-row">${tags}</span>
+          </button>`;
+      }).join("");
+    });
   }
 
   function renderParams() {
@@ -1147,9 +1243,8 @@
     let html;
 
     if (state.tab === "session") {
-      const jobs = [...state.jobs.values()]
-        .filter((job) => matchesSearch(`${job.request.prompt} ${job.request.backend || ""}`))
-        .reverse();
+      const jobs = sessionJobs();
+      rebuildSessionQueue(jobs);
       html = jobs.length
         ? jobs.map(renderJob).join("")
         : empty("Generations from this session appear here.");
@@ -1169,19 +1264,36 @@
       }
     }
 
-    feed.innerHTML = html;
+    preserveFocus(feed, () => { feed.innerHTML = html; });
     syncPlayingHighlight();
   }
 
-  function renderJob(job) {
+  function sessionJobs() {
+    return [...state.jobs.values()]
+      .filter((job) => matchesSearch(`${job.request.prompt} ${job.request.backend || ""}`))
+      .reverse();
+  }
+
+  function jobFiles(job) {
+    return job.result ? job.result.files : [];
+  }
+
+  // Kept separate from renderFeed so pollJob can refresh state.queue without
+  // touching the DOM when the row it changed is not on screen. Accepts an
+  // already-computed job list to avoid filtering/reversing state.jobs twice.
+  function rebuildSessionQueue(jobs = sessionJobs()) {
+    state.queue = [];
+    jobs.forEach((job) => {
+      const prompt = job.result ? job.result.prompt : job.request.prompt;
+      jobFiles(job).forEach((path) => state.queue.push({ path, title: prompt }));
+    });
+  }
+
+  function jobBodyHtml(job) {
     const result = job.result;
     const prompt = result ? result.prompt : job.request.prompt;
     const backend = job.request.backend || "";
-    const files = result ? result.files : [];
-
-    files.forEach((path) => {
-      state.queue.push({ path, title: prompt });
-    });
+    const files = jobFiles(job);
 
     const progress = job.progress && job.progress.total
       ? `<div class="bar"><div class="bar-fill" style="width: ${(job.progress.done / job.progress.total) * 100}%"></div></div>`
@@ -1192,7 +1304,6 @@
       : "";
 
     return `
-      <article class="job ${job.status}">
         <div class="job-head">
           <span class="badge ${job.status}">${escapeHtml(job.status)}</span>
           <span>${escapeHtml(backend)}</span>
@@ -1206,8 +1317,28 @@
           path,
           title: path.split("/").pop(),
           meta: backend,
-        })).join("")}
-      </article>`;
+        })).join("")}`;
+  }
+
+  function renderJob(job) {
+    return `<article class="job ${job.status}" data-job-id="${escapeHtml(job.id)}">${jobBodyHtml(job)}</article>`;
+  }
+
+  // Polling hits the same job every ~1.2s while it runs; rebuilding the whole
+  // feed each time would blow away scroll position and any in-progress focus
+  // for rows that have not changed. Patch the one row in place, and only
+  // fall back to a full re-render when it is not the one currently on screen.
+  function patchJob(job) {
+    if (state.tab !== "session") return;
+    rebuildSessionQueue();
+    const row = document.querySelector(`.job[data-job-id="${CSS.escape(job.id)}"]`);
+    if (!row) {
+      renderFeed();
+      return;
+    }
+    row.className = `job ${job.status}`;
+    preserveFocus(row, () => { row.innerHTML = jobBodyHtml(job); });
+    syncPlayingHighlight();
   }
 
   function renderTrack(track) {
@@ -1234,7 +1365,7 @@
         </div>
         <div class="track-actions">
           ${reusable ? `<button class="icon-btn" type="button" data-action="reuse" data-path="${safePath}">Reuse</button>` : ""}
-          <a class="icon-btn" href="${mediaUrl(path, { download: true })}" download>Save</a>
+          <a class="icon-btn" data-action="save" data-path="${safePath}" href="${mediaUrl(path, { download: true })}" download>Save</a>
           ${deletable ? `<button class="icon-btn danger" type="button" data-action="delete" data-path="${safePath}">Delete</button>` : ""}
         </div>
       </div>`;
@@ -1301,7 +1432,7 @@
     for (;;) {
       const job = await api(`/jobs/${id}`);
       state.jobs.set(job.id, job);
-      renderFeed();
+      patchJob(job);
       if (job.status === "succeeded" || job.status === "failed") {
         if (job.status === "succeeded") await loadLibrary();
         return job;
@@ -1516,7 +1647,8 @@
         <div></div>
       </div>`;
 
-    $("settingsBody").innerHTML = appearance + sections + paths;
+    const body = $("settingsBody");
+    preserveFocus(body, () => { body.innerHTML = appearance + sections + paths; });
     $("themeSelect").value = localStorage.getItem(THEME_KEY) || "system";
     $("themeSelect").addEventListener("change", (event) => {
       localStorage.setItem(THEME_KEY, event.target.value);
@@ -1559,13 +1691,18 @@
     }
   }
 
+  const settingsTrap = createFocusTrap($("settingsOverlay"));
+
   function showSettings(open) {
     const overlay = $("settingsOverlay");
-    if (open === undefined) open = overlay.classList.contains("hidden");
+    const wasHidden = overlay.classList.contains("hidden");
+    if (open === undefined) open = wasHidden;
     overlay.classList.toggle("hidden", !open);
     if (open) {
+      if (wasHidden) settingsTrap.activate();
       loadSettings().catch((error) => { $("settingsStatus").textContent = error.message; });
-      $("settingsSearch").focus();
+    } else if (!wasHidden) {
+      settingsTrap.deactivate();
     }
   }
 
@@ -1578,10 +1715,17 @@
 
   // -- onboarding --------------------------------------------------------
 
+  const onboardTrap = createFocusTrap($("onboardOverlay"));
+
   function showOnboarding(open) {
     const overlay = $("onboardOverlay");
+    const wasHidden = overlay.classList.contains("hidden");
     overlay.classList.toggle("hidden", !open);
-    if (!open) return;
+    if (!open) {
+      if (!wasHidden) onboardTrap.deactivate();
+      return;
+    }
+    if (wasHidden) onboardTrap.activate();
 
     $("onboardList").innerHTML = state.providers.map((provider) => `
       <div class="onboard-card">
@@ -1624,8 +1768,12 @@
   function setTab(tab) {
     state.tab = tab;
     document.querySelectorAll(".tab").forEach((button) => {
-      button.classList.toggle("active", button.dataset.tab === tab);
+      const active = button.dataset.tab === tab;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-selected", String(active));
+      button.tabIndex = active ? 0 : -1;
     });
+    $("feed").setAttribute("aria-labelledby", `tab-${tab}`);
     renderFeed();
   }
 
@@ -1637,6 +1785,22 @@
   document.querySelector(".tabs").addEventListener("click", (event) => {
     const button = event.target.closest(".tab");
     if (button) setTab(button.dataset.tab);
+  });
+
+  // Arrow-key navigation for the tablist (WAI-ARIA APG tabs pattern, automatic
+  // activation): moving focus also switches the panel.
+  document.querySelector(".tabs").addEventListener("keydown", (event) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    const tabs = [...document.querySelectorAll(".tab")];
+    const currentIndex = tabs.findIndex((tab) => tab.dataset.tab === state.tab);
+    let nextIndex = currentIndex;
+    if (event.key === "ArrowLeft") nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+    else if (event.key === "ArrowRight") nextIndex = (currentIndex + 1) % tabs.length;
+    else if (event.key === "Home") nextIndex = 0;
+    else if (event.key === "End") nextIndex = tabs.length - 1;
+    event.preventDefault();
+    setTab(tabs[nextIndex].dataset.tab);
+    tabs[nextIndex].focus();
   });
 
   $("feed").addEventListener("click", async (event) => {
@@ -1679,7 +1843,11 @@
   $("generateBtn").addEventListener("click", generate);
   $("refineBtn").addEventListener("click", previewRefine);
   $("refreshBtn").addEventListener("click", () => { loadProviders(); loadLibrary(); });
-  $("search").addEventListener("input", renderFeed);
+  let searchDebounce = null;
+  $("search").addEventListener("input", () => {
+    clearTimeout(searchDebounce);
+    searchDebounce = setTimeout(renderFeed, 150);
+  });
   $("settingsBtn").addEventListener("click", () => showSettings());
   $("settingsClose").addEventListener("click", () => showSettings(false));
   $("saveSettingsBtn").addEventListener("click", saveSettings);
