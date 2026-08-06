@@ -839,7 +839,7 @@
   </div>
 
   <!-- Settings ------------------------------------------------------- -->
-  <div class="overlay hidden" id="settingsOverlay" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+  <div class="overlay hidden" id="settingsOverlay" role="dialog" aria-modal="true" aria-labelledby="settingsTitle" tabindex="-1">
     <div class="sheet">
       <div class="sheet-head">
         <h2 id="settingsTitle">Settings</h2>
@@ -858,7 +858,7 @@
   </div>
 
   <!-- Onboarding ----------------------------------------------------- -->
-  <div class="overlay hidden" id="onboardOverlay" role="dialog" aria-modal="true" aria-labelledby="onboardTitle">
+  <div class="overlay hidden" id="onboardOverlay" role="dialog" aria-modal="true" aria-labelledby="onboardTitle" tabindex="-1">
     <div class="sheet">
       <div class="sheet-head">
         <h2 id="onboardTitle">Pick a backend to get started</h2>
@@ -965,17 +965,21 @@
       ? [active.selectionStart, active.selectionEnd]
       : null;
 
-    update();
-
-    if (!selector) return;
-    const restored = container.querySelector(selector);
-    if (!restored) return;
-    restored.focus();
-    if (selection && "setSelectionRange" in restored) {
-      try {
-        restored.setSelectionRange(selection[0], selection[1]);
-      } catch {
-        // Not every restored input type supports range selection (e.g. number).
+    try {
+      update();
+    } finally {
+      if (selector) {
+        const restored = container.querySelector(selector);
+        if (restored) {
+          restored.focus();
+          if (selection && "setSelectionRange" in restored) {
+            try {
+              restored.setSelectionRange(selection[0], selection[1]);
+            } catch {
+              // Not every restored input type supports range selection (e.g. number).
+            }
+          }
+        }
       }
     }
   }
@@ -1240,7 +1244,7 @@
 
     if (state.tab === "session") {
       const jobs = sessionJobs();
-      rebuildSessionQueue();
+      rebuildSessionQueue(jobs);
       html = jobs.length
         ? jobs.map(renderJob).join("")
         : empty("Generations from this session appear here.");
@@ -1275,10 +1279,11 @@
   }
 
   // Kept separate from renderFeed so pollJob can refresh state.queue without
-  // touching the DOM when the row it changed is not on screen.
-  function rebuildSessionQueue() {
+  // touching the DOM when the row it changed is not on screen. Accepts an
+  // already-computed job list to avoid filtering/reversing state.jobs twice.
+  function rebuildSessionQueue(jobs = sessionJobs()) {
     state.queue = [];
-    sessionJobs().forEach((job) => {
+    jobs.forEach((job) => {
       const prompt = job.result ? job.result.prompt : job.request.prompt;
       jobFiles(job).forEach((path) => state.queue.push({ path, title: prompt }));
     });
